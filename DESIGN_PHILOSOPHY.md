@@ -543,3 +543,11 @@ AIは「よし、リソースが足りないから、この部分の実装は諦
 生成できなかった原因もAIに自問させることで解決の糸口を見つけて、DESIGN_PHILOSOPHY.mdをブラッシュアップしていける。
 以下はプロンプトの例：
 カレント ./ にあるオリジナルソースとマニュフェストのみを頼りに ./python に再生した Python版ソースを仕様書の *意味ベース* でどの程度の精度で生成ができているか自己評価しろ。項目毎にパーセンテージを報告せよ。100%に足りないところは分析してレポートせよ。レポートを作成するさいは画面がくずれるから罫線の表は使うな。
+
+---
+
+## License
+[![License: CC BY 4.0](https://img.shields.io/badge/License-CC%20BY%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/deed.ja)
+
+Copyright (c) 2026 Kouichi Shiroma
+This work is licensed under a [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/).
