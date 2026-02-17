@@ -1,4 +1,4 @@
-# spec.md: CIP-Bridge (v2.5) - Fractal AI Orchestrator
+# spec.md: CIP-Bridge (v2.6) - Fractal AI Orchestrator
 
 ## 1. 目的 (Objective)
 
@@ -17,9 +17,8 @@
 * **Base Directory:** `./cip_bus/`
 * **Registry:** 各インスタンスは `./cip_bus/<ID>/bridge.pid` に自身のPIDを記録。
 * **Mailbox:**
-* 送信先へのメッセージ：`./cip_bus/<TargetID>/inbox`
-* 書き込み完了後、対象PIDへ `SIGUSR1` を送信して通知。
-
+    *   送信先へのメッセージ：`./cip_bus/<TargetID>/inbox`
+    *   書き込み完了後、対象PIDへ `SIGUSR1` を送信して通知。
 
 * **I/O多重化:** `selectors` モジュール等を用い、標準入力、PTY出力、およびシグナル受信を非同期で監視。
 
@@ -64,6 +63,36 @@
 
 * オートモード中の交渉ログは標準出力（画面）には出さず、`negotiation.log` に記録。
 * 画面上には「Negotiating with @cpu_emu...」等の進捗ステータスのみ表示。
+
+### 5.4 Worker Bootstrap Process & Fractal Propagation
+
+`CIP-Bridge` は Worker プロセスを検知した際、以下の初期化プロセスを透過的に実行する。
+
+1.  **環境整備 (Philosophy Link):**
+    *   Worker のカレントディレクトリに `DESIGN_PHILOSOPHY.md` のシンボリックリンクを作成する。
+    *   リンク先は、現在のディレクトリ階層の深さから計算したルートへの相対パスとする（例: `ln -s ../../DESIGN_PHILOSOPHY.md .`）。これにより、多重リンクを回避し、常にルートの実体を参照させる。
+
+2.  **自律的役割判断 (Autonomous Role Discovery):**
+    *   Worker の `inbox` に以下のシステムプロンプトを自動投入し、Worker 自身に役割を判断させる。
+
+    ```markdown
+    [SYSTEM: Context Initialization]
+    あなたはCIPエコシステムのノードとして起動しました。
+    現在のカレントディレクトリ（担当領域）を確認し、以下の手順で自身の役割を自律的に決定してください。
+
+    1. **憲法の確認 (Global Philosophy):**
+       ルートの設計思想が存在するか確認し、ロードしてください。
+       `$ ls -l DESIGN_PHILOSOPHY.md` (シンボリックリンクなら `cat`, 実体なら `read_file`)
+
+    2. **法律の確認 (Local Manifest):**
+       このディレクトリのアーキテクチャ定義（`ARCHITECTURE_MANIFEST.md`）をロードしてください。
+
+    3. **部下の確認 (Sub-Node Discovery):**
+       さらに下位のディレクトリ（サブモジュール）が存在するか確認してください。
+       もし存在すれば、あなたはそれらのリーダー（Local Leader）としての責務も負います。
+
+    全ての確認が完了したら、現在の役割（Worker / Local Leader / Root Leader）と準備完了の旨を `[READY]` と共に出力してください。
+    ```
 
 ---
 

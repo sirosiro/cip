@@ -50,4 +50,13 @@
 ### 4.3. Stream Analyzer (ストリーム解析)
 - **責務:** 出力バッファを監視し、キーワード (`[NEED_CONSENSUS]`, `[COMPLETED]`) を検知する。
 - **重要なアルゴリズム:** ステートマシンによるエスケープシーケンスのスキップとキーワードマッチング。
+
+### 4.4. Worker Manager (Worker管理)
+- **責務:**
+    - 新規Workerプロセスの検知。
+    - **Philosophy Inheritance:** Workerのディレクトリにルートへのシンボリックリンクを作成する。
+    - **Autonomous Role Discovery:** Workerに対して初期化プロンプト（憲法確認、法律確認、役割判断）を注入し、即戦力化する。
+- **アルゴリズム:**
+    - ディレクトリ深度に応じた相対パス計算 (`ln -s ../../DESIGN_PHILOSOPHY.md .`)。
+    - `inbox` へのシステムメッセージ自動送信。
 -->
