@@ -76,8 +76,67 @@ class CIPBridge:
             except Exception:
                 pass
 
+    def setup_philosophy_link(self):
+        # @intent:responsibility See 4.4 Worker Manager in ARCHITECTURE_MANIFEST.md
+        #                       (Philosophy Inheritance & Relative Symlink Creation)
+        target_filename = "DESIGN_PHILOSOPHY.md"
+        
+        if os.path.exists(target_filename):
+            return
+
+        current_dir = os.path.abspath(".")
+        parent_dir = os.path.dirname(current_dir)
+        
+        for _ in range(10): # Search up to 10 levels
+            target_path = os.path.join(parent_dir, target_filename)
+            if os.path.exists(target_path):
+                rel_path = os.path.relpath(target_path, ".")
+                try:
+                    os.symlink(rel_path, target_filename)
+                except OSError as e:
+                    with open("bridge_errors.log", "a") as f:
+                        f.write(f"Failed to create symlink: {e}\n")
+                return
+            
+            if parent_dir == os.path.dirname(parent_dir): # Reached root
+                break
+            parent_dir = os.path.dirname(parent_dir)
+
+    def inject_bootstrap_prompt(self):
+        # @intent:responsibility See 4.4 Worker Manager in ARCHITECTURE_MANIFEST.md
+        #                       (Autonomous Role Discovery Prompt Injection)
+        prompt = """
+[SYSTEM: Context Initialization]
+あなたはCIPエコシステムのノードとして起動しました。
+現在のカレントディレクトリ（担当領域）を確認し、以下の手順で自身の役割を自律的に決定してください。
+
+1. **憲法の確認 (Global Philosophy):**
+   ルートの設計思想が存在するか確認し、ロードしてください。
+   `$ ls -l DESIGN_PHILOSOPHY.md` (シンボリックリンクなら `cat`, 実体なら `read_file`)
+
+2. **法律の確認 (Local Manifest):**
+   このディレクトリのアーキテクチャ定義（`ARCHITECTURE_MANIFEST.md`）をロードしてください。
+
+3. **部下の確認 (Sub-Node Discovery):**
+   さらに下位のディレクトリ（サブモジュール）が存在するか確認してください。
+   もし存在すれば、あなたはそれらのリーダー（Local Leader）としての責務も負います。
+
+全ての確認が完了したら、現在の役割（Worker / Local Leader / Root Leader）と準備完了の旨を `[READY]` と共に出力してください。
+"""
+        # Wait for gemini-cli initialization
+        time.sleep(1.0)
+        
+        try:
+            with open(self.inbox_path, "w") as f:
+                f.write(prompt.strip())
+            os.kill(os.getpid(), signal.SIGUSR1)
+        except Exception as e:
+             with open("bridge_errors.log", "a") as f:
+                f.write(f"Failed to inject bootstrap prompt: {e}\n")
+
     def run(self):
         self.setup_bus()
+        self.setup_philosophy_link()
         signal.signal(signal.SIGUSR1, self.handle_signal)
         signal.signal(signal.SIGWINCH, self.handle_winch)
 
@@ -95,8 +154,11 @@ class CIPBridge:
         try:
             tty.setraw(sys.stdin.fileno())
             
-            # 初回のウィンドウサイズ設定
+            # Initial window size
             self.handle_winch(None, None)
+
+            # Inject bootstrap prompt
+            self.inject_bootstrap_prompt()
 
             output_buffer = b""
             

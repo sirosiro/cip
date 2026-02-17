@@ -53,10 +53,12 @@
 
 ### 4.4. Worker Manager (Worker管理)
 - **責務:**
-    - 新規Workerプロセスの検知。
     - **Philosophy Inheritance:** Workerのディレクトリにルートへのシンボリックリンクを作成する。
-    - **Autonomous Role Discovery:** Workerに対して初期化プロンプト（憲法確認、法律確認、役割判断）を注入し、即戦力化する。
-- **アルゴリズム:**
-    - ディレクトリ深度に応じた相対パス計算 (`ln -s ../../DESIGN_PHILOSOPHY.md .`)。
-    - `inbox` へのシステムメッセージ自動送信。
+        - **Algorithm:** 現在のディレクトリから親を再帰的に探索し、`DESIGN_PHILOSOPHY.md` の実体を発見する。発見した場合、そのパスへの**相対パス**を計算してシンボリックリンクを作成する。物理コピーは行わない。
+    - **Autonomous Role Discovery:** Workerに対して初期化プロンプトを注入し、即戦力化する。
+        - **Bootstrap Prompt Content:**
+            1. 憲法の確認 (`ls -l DESIGN_PHILOSOPHY.md`)
+            2. 法律の確認 (`read_file ARCHITECTURE_MANIFEST.md`)
+            3. 部下の確認 (サブディレクトリ探索)
+            4. 自律的な役割判断と `[READY]` 出力
 -->
