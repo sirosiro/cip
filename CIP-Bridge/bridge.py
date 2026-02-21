@@ -16,9 +16,35 @@ from collections import deque
 #                         また、ウィンドウサイズ変更を透過的に伝播させる。
 
 class CIPBridge:
-    def __init__(self, cmd=["gemini"], bus_id="leader"):
-        # @intent:rationale デフォルトのコマンド名を gemini に修正。
-        self.cmd = cmd
+    def _find_gemini_command(self):
+        # 1. 環境変数による指定
+        env_cmd = os.environ.get("CIP_BRIDGE_CMD")
+        if env_cmd:
+            return [env_cmd]
+
+        # 2. PATH から探索
+        import shutil
+        path_cmd = shutil.which("gemini")
+        if path_cmd:
+            return [path_cmd]
+            
+        # 3. 一般的なパスの探索 (macOS/Linux)
+        common_paths = [
+            os.path.expanduser("~/.volta/bin/gemini"),
+            os.path.expanduser("~/.npm-global/bin/gemini"),
+            "/usr/local/bin/gemini",
+            "/opt/homebrew/bin/gemini"
+        ]
+        for p in common_paths:
+            if os.path.exists(p) and os.access(p, os.X_OK):
+                return [p]
+        
+        # 4. 見つからない場合はデフォルト
+        return ["gemini"]
+
+    def __init__(self, cmd=None, bus_id="leader"):
+        # @intent:rationale デフォルトのコマンド名を自動探索。
+        self.cmd = cmd if cmd else self._find_gemini_command()
         self.bus_id = bus_id
         self.bus_dir = f"./cip_bus/{bus_id}"
         self.inbox_path = os.path.join(self.bus_dir, "inbox")
@@ -146,9 +172,12 @@ class CIPBridge:
         
         if pid == 0:
             try:
-                os.execvp(self.cmd[0], self.cmd)
-            except FileNotFoundError:
-                print(f"\n[Error] Command '{self.cmd[0]}' not found.")
+                # 環境変数を明示的に引き継ぐ
+                os.execvpe(self.cmd[0], self.cmd, os.environ)
+            except Exception as e:
+                # 子プロセスでエラーが起きても画面に見えるようにする
+                print(f"\n[Child Process Error] {e}")
+                time.sleep(5)
                 sys.exit(1)
         
         try:
@@ -157,10 +186,10 @@ class CIPBridge:
             # Initial window size
             self.handle_winch(None, None)
 
-            # Inject bootstrap prompt
-            self.inject_bootstrap_prompt()
+            # Inject bootstrap prompt removed from here
 
             output_buffer = b""
+            bootstrapped = False
             
             while True:
                 # 監視対象に self.pipe_r (セルフパイプの読み込み側) を追加
@@ -190,12 +219,32 @@ class CIPBridge:
                     os.write(sys.stdout.fileno(), data)
                     sys.stdout.flush()
 
+                    # 初回起動時にBootstrapプロンプトを注入
+                    if not bootstrapped:
+                        # 判定強化: 単なる出力ではなく、プロンプトらしきものが出たか？
+                        # Node.jsの警告メッセージだけで反応しないようにする。
+                        # gemini-cli のプロンプトは通常 ">" を含むはず。
+                        if b">" in data:
+                             bootstrapped = True
+                             # プロンプト表示完了待ち
+                             time.sleep(1.0)
+                             self.inject_bootstrap_prompt()
+
                     # @intent:responsibility キーワード検知
                     output_buffer += data
                     if b"[NEED_CONSENSUS]" in output_buffer:
                         # 簡易的な検知ロジック
                         with open("bridge_events.log", "a") as f:
                             f.write("Detected [NEED_CONSENSUS]\n")
+                        output_buffer = b"" # バッファをリセット
+
+                    # @intent:responsibility 承認ダイアログの自動応答 (Auto-Approval)
+                    if b"Allow execution of:" in output_buffer:
+                        # デフォルトのフォーカス "Allow once" に Enter を送る
+                        time.sleep(0.5)
+                        os.write(self.master_fd, b"\r\n")
+                        with open("bridge_events.log", "a") as f:
+                            f.write("Detected Confirmation: Sent Enter\n")
                         output_buffer = b"" # バッファをリセット
 
         finally:
