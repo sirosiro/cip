@@ -32,9 +32,34 @@
         *   `kill -USR1 $(cat cip_bus/leader/bridge.pid)`
 3.  元のターミナル（Bridgeが動いている方）で、AIに対して "外部からの注入テスト" というプロンプトが自動的に入力され、AIが回答を開始することを確認します。
 
+## 5. フラクタル初期化と役割判断の確認 (Fractal Bootstrap)
+
+`bridge.py` がサブディレクトリで起動した際、自動的に環境を構築し、AIに役割を認識させる機能を確認します。
+
+1.  **テスト環境の準備:**
+    *   `mkdir -p sandbox/worker_node`
+    *   `echo "# Test Manifest" > sandbox/worker_node/ARCHITECTURE_MANIFEST.md`
+
+2.  **CIP-Bridge の起動:**
+    *   `cd sandbox/worker_node`
+    *   `python3 ../../CIP-Bridge/bridge.py`
+
+3.  **自動挙動の観察:**
+    *   起動後、何も入力せずに待機します。
+    *   以下の挙動が自動で行われることを確認します：
+        1.  `gemini-cli` が起動する。
+        2.  `[SYSTEM: Context Initialization]...` というプロンプトが自動入力される。
+        3.  `ls -l DESIGN_PHILOSOPHY.md` 等のコマンドが実行される（承認ダイアログは自動でパスする）。
+        4.  AIが「憲法を確認しました」「私はWorkerです」等の回答を行い、`[READY]` 状態になる。
+
+4.  **ファイルシステムの確認:**
+    *   `bridge.py` を終了後、`ls -la` で以下を確認します：
+        *   `DESIGN_PHILOSOPHY.md` -> `../../DESIGN_PHILOSOPHY.md` へのシンボリックリンクが存在すること。
+        *   `.gitignore` が生成され、`cip_bus/` 等が含まれていること。
+
 ---
 
-## 5. フィードバック
+## 6. フィードバック
 
 上記のステップで期待通りに動作しない場合は、エラーログ（もしあれば）と共に報告してください。
 特に PTY の挙動については、使用しているターミナル（iTerm2, Terminal.app, VSCode Integrated Terminal 等）によって差異が出る可能性があります。

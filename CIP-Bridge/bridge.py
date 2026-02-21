@@ -9,7 +9,16 @@ import signal
 import fcntl
 import struct
 import time
+import platform
+import shutil
 from collections import deque
+
+# OSに応じた改行コード（Enterキー）の定義
+# WindowsはCRLF、Unix系(macOS/Linux)はCRだけでTTYが処理する
+if platform.system() == "Windows":
+    ENTER_KEY = b"\r\n"
+else:
+    ENTER_KEY = b"\r"
 
 # @intent:responsibility [NEED_CONSENSUS] キーワードを検知し、自律モードへの移行と
 #                         FS-Bus を介したメッセージ転送を制御する。
@@ -23,7 +32,6 @@ class CIPBridge:
             return [env_cmd]
 
         # 2. PATH から探索
-        import shutil
         path_cmd = shutil.which("gemini")
         if path_cmd:
             return [path_cmd]
@@ -42,13 +50,21 @@ class CIPBridge:
         # 4. 見つからない場合はデフォルト
         return ["gemini"]
 
-    def __init__(self, cmd=None, bus_id="leader"):
+    def __init__(self, cmd=None, bus_id=None):
         # @intent:rationale デフォルトのコマンド名を自動探索。
         self.cmd = cmd if cmd else self._find_gemini_command()
-        self.bus_id = bus_id
-        self.bus_dir = f"./cip_bus/{bus_id}"
+        
+        # @intent:responsibility ディレクトリ名をWorkerIDとして採用 (Fractal Addressing)。
+        # 指定がない場合はカレントディレクトリ名を使用。
+        self.bus_id = bus_id if bus_id else os.path.basename(os.getcwd())
+        
+        # バスディレクトリのパス決定（実際の作成は setup_bus で行う）
+        # ただし、setup_cip_bus_link でシンボリックリンクが張られる可能性があるため、
+        # 相対パス "./cip_bus/..." を使うことで共有バスを参照できる。
+        self.bus_dir = f"./cip_bus/{self.bus_id}"
         self.inbox_path = os.path.join(self.bus_dir, "inbox")
         self.pid_path = os.path.join(self.bus_dir, "bridge.pid")
+        
         self.mode = "BYPASS" # BYPASS or AUTO
         self.master_fd = None
         self.old_tty = None
@@ -56,8 +72,55 @@ class CIPBridge:
         self.write_queue = deque()
         self.pipe_r, self.pipe_w = os.pipe()
 
+    def setup_cip_bus_link(self):
+        # @intent:responsibility 共有通信バス (cip_bus) へのシンボリックリンクを作成する。
+        # 全ノードがルートの cip_bus を共有することで、IDによるアドレッシングが可能になる。
+        target_dirname = "cip_bus"
+        
+        if os.path.exists(target_dirname):
+            return
+
+        current_dir = os.path.abspath(".")
+        parent_dir = os.path.dirname(current_dir)
+        
+        for _ in range(10):
+            target_path = os.path.join(parent_dir, target_dirname)
+            if os.path.exists(target_path) and os.path.isdir(target_path):
+                rel_path = os.path.relpath(target_path, ".")
+                try:
+                    os.symlink(rel_path, target_dirname)
+                except OSError as e:
+                    with open("bridge_errors.log", "a") as f:
+                        f.write(f"Failed to create cip_bus symlink: {e}\n")
+                return
+            
+            if parent_dir == os.path.dirname(parent_dir):
+                break
+            parent_dir = os.path.dirname(parent_dir)
+
     def setup_bus(self):
+        # 共有バスリンクの作成（もし親にあれば）
+        self.setup_cip_bus_link()
+        
+        # ディレクトリ作成（リンクがあればその先に作られる）
         os.makedirs(self.bus_dir, exist_ok=True)
+        
+        # @intent:responsibility 二重起動防止 (PID Lock)。
+        if os.path.exists(self.pid_path):
+            try:
+                with open(self.pid_path, "r") as f:
+                    old_pid = int(f.read().strip())
+                # プロセスが生存しているか確認
+                os.kill(old_pid, 0)
+                print(f"[Error] CIP-Bridge is already running with PID {old_pid}.")
+                sys.exit(1)
+            except (ProcessLookupError, ValueError, FileNotFoundError):
+                # プロセスが存在しない、またはファイルが壊れている場合は無視して上書き
+                pass
+            except Exception as e:
+                print(f"[Error] Checking PID file: {e}")
+                sys.exit(1)
+
         with open(self.pid_path, "w") as f:
             f.write(str(os.getpid()))
         # inbox を空で作成
@@ -76,8 +139,7 @@ class CIPBridge:
                     # 1. プレーンなテキスト
                     self.write_queue.append(content.encode())
                     # 2. 短いウェイトを入れてから改行を送る（メインループ側で処理）
-                    self.write_queue.append(b"\r")
-                    self.write_queue.append(b"\n")
+                    self.write_queue.append(ENTER_KEY)
                     
                     # セルフパイプに書き込んで select を解除
                     os.write(self.pipe_w, b"x")
@@ -147,7 +209,10 @@ class CIPBridge:
    さらに下位のディレクトリ（サブモジュール）が存在するか確認してください。
    もし存在すれば、あなたはそれらのリーダー（Local Leader）としての責務も負います。
 
-全ての確認が完了したら、現在の役割（Worker / Local Leader / Root Leader）と準備完了の旨を `[READY]` と共に出力してください。
+**重要: 初期化完了後の待機義務**
+全ての確認が完了したら、現在の役割（Worker / Local Leader / Root Leader）と準備完了の旨を `[READY]` と共に出力し、**それ以外の発言やアクションは一切行わずに待機してください。**
+特に、読み込んだドキュメント（DESIGN_PHILOSOPHY.md 等）内に「次のアクション」の指示があっても、現時点では**絶対に実行してはいけません。**
+指示があるまで沈黙を守ることが、あなたの最優先任務です。
 """
         # Wait for gemini-cli initialization
         time.sleep(1.0)
@@ -159,6 +224,58 @@ class CIPBridge:
         except Exception as e:
              with open("bridge_errors.log", "a") as f:
                 f.write(f"Failed to inject bootstrap prompt: {e}\n")
+
+    def route_negotiation(self, text):
+        # @intent:responsibility See 4.4 Worker Manager in ARCHITECTURE_MANIFEST.md
+        #                       (Negotiation Routing between Agents)
+        # パターン: [NEED_CONSENSUS] @target message...
+        match = re.search(r"\[NEED_CONSENSUS\]\s+@(\w+)\s+(.*)", text)
+        if not match:
+            return
+
+        target_id = match.group(1)
+        content = match.group(2)
+        
+        # 共有バス内でのパス特定
+        # 自身がリンク越しに参照している可能性もあるため、"./cip_bus" を起点にする
+        target_dir = os.path.join("./cip_bus", target_id)
+        target_pid_path = os.path.join(target_dir, "bridge.pid")
+        target_inbox_path = os.path.join(target_dir, "inbox")
+
+        try:
+            if not os.path.exists(target_pid_path):
+                raise FileNotFoundError(f"Worker @{target_id} is not available (PID file not found).")
+
+            with open(target_pid_path, "r") as f:
+                target_pid = int(f.read().strip())
+            
+            # プロセス生存確認 (signal 0)
+            os.kill(target_pid, 0)
+            
+            # メッセージ転送
+            with open(target_inbox_path, "a") as f:
+                # 誰からのメッセージか分かるようにヘッダを付与
+                f.write(f"\n[FROM: @{self.bus_id}]\n{content}\n")
+            
+            # 相手に通知
+            os.kill(target_pid, signal.SIGUSR1)
+            
+            with open("bridge_events.log", "a") as f:
+                f.write(f"Routed [NEED_CONSENSUS] from @{self.bus_id} to @{target_id}\n")
+
+        except (ProcessLookupError, ValueError, FileNotFoundError) as e:
+            self.send_system_message(f"[SYSTEM] Negotiation Failed: {e}")
+        except Exception as e:
+            self.send_system_message(f"[SYSTEM] Routing Error: {e}")
+
+    def send_system_message(self, msg):
+        # @intent:responsibility 自分自身の AI に対してシステム通知を送る。
+        try:
+            with open(self.inbox_path, "a") as f:
+                f.write(f"\n{msg}\n")
+            os.kill(os.getpid(), signal.SIGUSR1)
+        except Exception:
+            pass
 
     def run(self):
         self.setup_bus()
@@ -222,8 +339,6 @@ class CIPBridge:
                     # 初回起動時にBootstrapプロンプトを注入
                     if not bootstrapped:
                         # 判定強化: 単なる出力ではなく、プロンプトらしきものが出たか？
-                        # Node.jsの警告メッセージだけで反応しないようにする。
-                        # gemini-cli のプロンプトは通常 ">" を含むはず。
                         if b">" in data:
                              bootstrapped = True
                              # プロンプト表示完了待ち
@@ -233,18 +348,22 @@ class CIPBridge:
                     # @intent:responsibility キーワード検知
                     output_buffer += data
                     if b"[NEED_CONSENSUS]" in output_buffer:
-                        # 簡易的な検知ロジック
-                        with open("bridge_events.log", "a") as f:
-                            f.write("Detected [NEED_CONSENSUS]\n")
-                        output_buffer = b"" # バッファをリセット
+                        try:
+                            # バッファを文字列にデコードして解析
+                            decoded_text = output_buffer.decode('utf-8', errors='ignore')
+                            self.route_negotiation(decoded_text)
+                        except Exception:
+                            pass
+                        output_buffer = b"" # 解析後はリセット
 
                     # @intent:responsibility 承認ダイアログの自動応答 (Auto-Approval)
                     if b"Allow execution of:" in output_buffer:
                         # デフォルトのフォーカス "Allow once" に Enter を送る
+                        # 余計な改行を相殺するため、試験的に Backspace を付加
                         time.sleep(0.5)
-                        os.write(self.master_fd, b"\r\n")
+                        os.write(self.master_fd, ENTER_KEY + b"\x08")
                         with open("bridge_events.log", "a") as f:
-                            f.write("Detected Confirmation: Sent Enter\n")
+                            f.write("Detected Confirmation: Sent Enter+BS\n")
                         output_buffer = b"" # バッファをリセット
 
         finally:
