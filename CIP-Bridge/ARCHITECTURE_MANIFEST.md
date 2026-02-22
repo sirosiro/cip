@@ -17,57 +17,38 @@
 
 #### 1. 核となる原則 (Core Principles)
 *   **透過的プロキシ (Transparent Proxy):** 通常時はユーザーの入出力を一切加工せず `gemini-cli` へ渡すこと。
-*   **キーワード駆動の自律制御 (Keyword-Driven Autonomy):** AIの出力に含まれる特定のキーワード (`[NEED_CONSENSUS]`) を検知した瞬間のみ、自律モードに移行すること。
-*   **疎結合な通信 (Loosely Coupled Communication):** エージェント間の通信はファイルシステム (`FS-Bus`) を介して非同期に行い、プロセス間の直接的な依存を排除すること。
+*   **構造化メッセージング (XML-Tagged Messaging):** エージェント間の通信は、`[TAG]` と `[/TAG]` で囲まれた構造化データとして扱い、解析の堅牢性を確保すること。
+*   **Pull型コンテキスト注入 (Pull-Based Context):** 大規模なメッセージやプロンプトは直接 PTY に流し込まず、`current_message.md` 等のファイルを介して AI に自律的に読み取らせること。
 
 #### 2. 主要なアーキテクチャ決定の記録 (Key Architectural Decisions)
 *   **Date:** 2026-02-15
-*   **Core Principle:** 透過的プロキシ
-*   **Decision:** Python の `pty.spawn()` 相当の機能と `selectors` による非同期 I/O を採用。
-*   **Rationale:** `gemini-cli` に本物のターミナルであると認識させ、ANSIエスケープシーケンスを維持するため。
-
+*   **Decision:** Python の `pty.spawn()` 相当の機能と非同期 I/O を採用。
 *   **Date:** 2026-02-22
-*   **Core Principle:** 堅牢なシグナル処理 (Signal-Safety)
-*   **Decision:** シグナルハンドラ内でのファイルI/Oを禁止し、パイプ経由でメインループへ通知するアーキテクチャを採用。
-*   **Rationale:** シグナルハンドラ内でのファイル操作や `write_queue` 操作は競合やデッドロックの原因となるため。また、PTYやIPC用パイプはノンブロッキングモードで扱うことで、通信詰まりによるハングアップを回避する。
+*   **Decision:** シグナルハンドラからメインループへの通知アーキテクチャ (Signal-Safe) への移行。
+*   **Decision:** エコーバックによる無限ループ回避のため、`[FROM: @...]` タグを含む行の転送を禁止。
+*   **Decision:** PTYバッファ溢れ回避のため、長文送信を廃止し、Pull型（ファイル経由）の通知システムを採用。
 
 #### 3. AIとの協調に関する指針 (AI Collaboration Policy)
-*   **モード遷移の透明性:** モードが切り替わる際は、必ずターミナル上にステータス（「Negotiating...」等）を表示し、エンジニアが状況を把握できるようにすること。
+*   **自律的読み込みの推奨:** AI は `[SYSTEM]` 通知を受け取った際、自律的に `read_file` を実行し、コンテキストを同期する義務を負う。
 
 #### 4. コンポーネント設計仕様 (Component Design Specifications)
 
 ### 4.1. PTY Controller (PTY制御)
-- **責務:** `gemini-cli` を子プロセスとして起動し、マスター/スレーブPTYを介して入出力を制御する。
-- **提供するAPI:**
-    - `spawn(argv)`: 指定されたコマンドをPTY内で実行する。
-    - `read_master()`: ターミナルの出力を読み取る。
-    - `write_master(data)`: ターミナルへ入力を送り込む。
-- **重要なアルゴリズム:** 非ブロッキングな I/O 多重化（`selectors` + `timeout` を使用）。
+- **責務:** `gemini-cli` の入出力を制御し、ANSIエスケープシーケンスを維持する。
+- **アルゴリズム:** 非ブロッキング I/O 多重化とタイムアウトによるハングアップ防止。
 
 ### 4.2. FS-Bus Manager (IPC管理)
-- **責務:** `./cip_bus/` 配下のディレクトリ構造を用いたメッセージの読み書き。
-- **データ構造:**
-    - `bridge.pid`: 自身のPID。
-    - `inbox`: 外部からの受信メッセージ（追記型テキスト）。
-- **状態遷移:**
-    1. `SIGUSR1` 受信時にシグナルハンドラがパイプに通知。
-    2. メインループがパイプを検知し、`process_inbox()` を実行。
-    3. `inbox` を読み取り、内容を空にする（アトミックな操作のため `flush` と `fsync` を徹底）。
-    4. 読み取ったメッセージを `gemini-cli` の標準入力へ流し込む。
+- **責務:** `./cip_bus/` を介したメッセージ交換。
+- **データフロー (Pull型):**
+    1. 受信メッセージを `inbox` から取得。
+    2. `current_message.md` に上書き保存（アトミック性を確保）。
+    3. AI に対し `read_file current_message.md` を促す通知を PTY に送信。
 
-### 4.3. Stream Analyzer (ストリーム解析)
-- **責務:** 出力バッファを監視し、キーワード (`[NEED_CONSENSUS]`, `[COMPLETED]`) を検知する。
-- **重要なアルゴリズム:**
-    - `strip_ansi()`: エスケープシーケンスを除去したクリーンなテキストでキーワード判定を行う。
-    - **正規表現の回避:** 脆弱性を避けるため、ID抽出等は単純な文字列操作（`index`, `slice`）を優先する。
+### 4.3. Stream Analyzer (構造化パース)
+- **責務:** `output_buffer` からタグ付きメッセージを抽出する。
+- **アルゴリズム:** 文字列検索 (`index`, `slice`) による堅牢な抽出。開始・終了タグのペアが揃った時のみ転送を実行。
 
 ### 4.4. Worker Manager (Worker管理)
 - **責務:**
-    - **Philosophy Inheritance:** Workerのディレクトリにルートへのシンボリックリンクを作成する。
-        - **Algorithm:** 現在のディレクトリから親を再帰的に探索し、`DESIGN_PHILOSOPHY.md` の実体を発見する。発見した場合、そのパスへの**相対パス**を計算してシンボリックリンクを作成する。物理コピーは行わない。
-    - **Autonomous Role Discovery:** Workerに対して初期化プロンプトを注入し、即戦力化する。
-        - **Bootstrap Prompt Content:**
-            1. 憲法の確認 (`ls -l DESIGN_PHILOSOPHY.md`)
-            2. 法律の確認 (`read_file ARCHITECTURE_MANIFEST.md`)
-            3. 部下の確認 (サブディレクトリ探索)
-            4. 自律的な役割判断と `[READY]` 出力
+    - **Philosophy Inheritance:** 親ディレクトリを遡り `DESIGN_PHILOSOPHY.md` への相対シンボリックリンクを作成。
+    - **Bootstrap:** `inbox` 経由で初期化プロンプトを提供し、役割の自律認識を促す。

@@ -47,26 +47,24 @@ class CIPBridge:
         self.inbox_path = os.path.join(self.bus_dir, "inbox")
         self.pid_path = os.path.join(self.bus_dir, "bridge.pid")
         
+        # @intent:fix Pull型通信用のメッセージ閲覧ファイル
+        self.current_message_path = "current_message.md"
+        
         self.mode = "BYPASS"
         self.master_fd = None
         self.old_tty = None
         
-        # @intent:fix パイプをノンブロッキングに設定し、ハングアップを防止。
-        #             select() と組み合わせることで、ブロッキングI/Oによるデッドロックを回避する。
         self.pipe_r, self.pipe_w = os.pipe()
         fcntl.fcntl(self.pipe_r, fcntl.F_SETFL, os.O_NONBLOCK)
         fcntl.fcntl(self.pipe_w, fcntl.F_SETFL, os.O_NONBLOCK)
 
-        # @intent:responsibility 交渉相手のIDを保持（返信先特定用）
         self.current_negotiation_partner = None
 
     def log_event(self, msg):
-        # @intent:responsibility 動作状況を bridge_events.log に記録する
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         try:
             with open("bridge_events.log", "a") as f:
                 f.write(f"[{timestamp}] [{self.bus_id}] {msg}\n")
-                # @intent:fix ログの即時性を確保するため、必ず flush と fsync を行う。
                 f.flush()
                 os.fsync(f.fileno())
         except Exception: pass
@@ -107,25 +105,18 @@ class CIPBridge:
             f.flush()
             os.fsync(f.fileno())
         
-        # Inbox 初期化
         with open(self.inbox_path, "w") as f:
-            pass # 空にする
+            pass 
 
         self.log_event("Bus setup completed.")
 
     def handle_signal(self, signum, frame):
-        # @intent:fix シグナルハンドラ内では最小限の処理（パイプへの通知）のみ行う (Async-Signal-Safety)。
-        #             ファイルI/Oや複雑な処理はメインループに任せることで、競合やハングアップを防ぐ。
         if signum == signal.SIGUSR1:
             try:
                 os.write(self.pipe_w, b"x")
-            except BlockingIOError:
-                pass # パイプがいっぱいなら無視（メインループが処理中で気づくはず）
-            except Exception:
-                pass
+            except Exception: pass
 
     def process_inbox(self):
-        # @intent:responsibility メインループから呼ばれ、Inboxの内容を読み取ってPTYへ流す。
         try:
             with open(self.inbox_path, "r+") as f:
                 content = f.read().strip()
@@ -137,8 +128,11 @@ class CIPBridge:
                     
                     self.log_event(f"Processing inbox message (len: {len(content)})")
 
-                    # 送信元IDの抽出
-                    # @intent:fix 正規表現の脆弱性（エスケープ問題）を回避するため、堅牢な文字列操作を使用する。
+                    with open(self.current_message_path, "w") as cf:
+                        cf.write(content)
+                        cf.flush()
+                        os.fsync(cf.fileno())
+
                     if "[FROM: @" in content:
                         try:
                             start_tag = "[FROM: @"
@@ -146,13 +140,13 @@ class CIPBridge:
                             end_idx = content.index("]", start_idx)
                             self.current_negotiation_partner = content[start_idx:end_idx]
                             self.log_event(f"Set negotiation partner to @{self.current_negotiation_partner}")
-                        except ValueError:
-                            self.log_event("Malformed [FROM] tag in message.")
+                        except ValueError: pass
 
-                    # PTYへ書き込み (ブロックせずに一気に書く)
-                    # メッセージ前後に改行を入れて認識しやすくする
-                    full_message = b"\n" + content.encode() + b"\n" + ENTER_KEY
-                    os.write(self.master_fd, full_message)
+                    # 通知メッセージを強調。AIが確実にコマンドを実行するように誘導する。
+                    notification = f"\n\n[SYSTEM] 新着メッセージがあります。内容を確認するため、以下のコマンドを実行してください。\n\nread_file {self.current_message_path}\n"
+                    os.write(self.master_fd, notification.encode())
+                    time.sleep(0.1)
+                    os.write(self.master_fd, ENTER_KEY)
                     
         except Exception as e:
             self.log_event(f"Error processing inbox: {e}")
@@ -203,20 +197,46 @@ class CIPBridge:
    さらに下位のディレクトリ（サブモジュール）が存在するか確認してください。
    もし存在すれば、あなたはそれらのリーダー（Local Leader）としての責務も負います。
 
+**重要: 交渉プロトコル (The Negotiation Loop)**
+他ノードとの通信には、以下のXMLライクなタグを**必ず**使用してください。タグで囲まれていないメッセージは相手に届きません。
+
+*   **要求/指示:**
+    ```
+    [NEED_CONSENSUS] @target_node
+    メッセージ本文...
+    [/NEED_CONSENSUS]
+    ```
+
+*   **承認:**
+    ```
+    [ACCEPTED]
+    承知しました...
+    [/ACCEPTED]
+    ```
+
+*   **拒否/対案:**
+    ```
+    [CONFLICT]
+    その方針には懸念があります...
+    [/CONFLICT]
+    ```
+
 **重要: 初期化完了後の待機義務**
 全ての確認が完了したら、現在の役割（Worker / Local Leader / Root Leader）と準備完了の旨を `[READY]` と共に出力し、**それ以外の発言やアクションは一切行わずに待機してください。**
-特に、読み込んだドキュメント（DESIGN_PHILOSOPHY.md 等）内に「次のアクション」の指示があっても、現時点では**絶対に実行してはいけません。**
 指示があるまで沈黙を守ることが、あなたの最優先任務です。
 """
         self.log_event("Injecting bootstrap prompt...")
         try:
-            with open(self.inbox_path, "w") as f:
+            with open(self.current_message_path, "w") as f:
                 f.write(prompt.strip())
                 f.flush()
                 os.fsync(f.fileno())
             
-            # 自分自身に通知 (パイプ経由)
-            os.write(self.pipe_w, b"x")
+            notification = f"\n\n[SYSTEM] 初期化コンテキストを受信しました。内容を確認するため、以下のコマンドを実行してください。\n\nread_file {self.current_message_path}\n"
+            os.write(self.master_fd, notification.encode())
+            time.sleep(0.1)
+            os.write(self.master_fd, ENTER_KEY)
+
         except Exception as e:
             self.log_event(f"Failed to inject bootstrap prompt: {e}")
 
@@ -234,48 +254,70 @@ class CIPBridge:
         os.kill(target_pid, 0)
         
         with open(target_inbox_path, "a") as f:
-            f.write(f"\n[FROM: @{self.bus_id}]\n{content}\n")
+            f.write(f"\n[FROM: @{self.bus_id}]\n{content.strip()}\n")
             f.flush()
             os.fsync(f.fileno())
         
         os.kill(target_pid, signal.SIGUSR1)
         return target_id
 
-    def route_negotiation(self, text):
-        start_tag = "[NEED_CONSENSUS] @"
-        if start_tag not in text:
-            return
-
+    def extract_tag_content(self, text, start_tag, end_tag):
+        # 文字列操作による堅牢なタグ抽出
         try:
             start_idx = text.index(start_tag)
+            end_idx = text.index(end_tag, start_idx + len(start_tag))
             
-            target_start = start_idx + len(start_tag)
-            match = re.search(r"\s", text[target_start:])
-            if not match: return
-            target_end = target_start + match.start()
-            target_id = text[target_start:target_end]
+            content_start = start_idx
+            content_end = end_idx + len(end_tag)
             
-            content_start = target_end + 1
-            content = text[content_start:].strip()
-            
-            if not target_id or not content:
-                return
+            extracted_block = text[content_start:content_end]
+            return extracted_block, content_end
+        except ValueError:
+            return None, -1
 
-            self._send_to_bus(target_id, content)
-            self.current_negotiation_partner = target_id
-            self.log_event(f"Routed [NEED_CONSENSUS] to @{target_id}")
+    def route_negotiation(self, clean_text):
+        start_tag = "[NEED_CONSENSUS]"
+        end_tag = "[/NEED_CONSENSUS]"
+        
+        block, end_idx = self.extract_tag_content(clean_text, start_tag, end_tag)
+        if not block: return None 
 
-        except (ValueError, IndexError):
-            self.log_event("Malformed [NEED_CONSENSUS] tag in message.")
-            return
+        if "[FROM: @" in block: return None # 受信メッセージの表示は無視
 
-    def route_feedback(self, text):
-        if not self.current_negotiation_partner: return
         try:
-            self._send_to_bus(self.current_negotiation_partner, text)
+            lines = block.splitlines()
+            first_line = lines[0]
+            if "@" in first_line:
+                at_idx = first_line.index("@")
+                target_part = first_line[at_idx+1:].strip()
+                target_id = target_part.split()[0]
+                
+                self._send_to_bus(target_id, block)
+                self.current_negotiation_partner = target_id
+                self.log_event(f"Routed [NEED_CONSENSUS] to @{target_id}")
+                return end_idx
+        except Exception: pass
+        
+        return None
+
+    def route_feedback(self, clean_text):
+        if not self.current_negotiation_partner: return None
+        
+        # ACCEPTED の処理
+        block, end_idx = self.extract_tag_content(clean_text, "[ACCEPTED]", "[/ACCEPTED]")
+        if block and "[FROM: @" not in block:
+            self._send_to_bus(self.current_negotiation_partner, block)
             self.log_event(f"Routed FEEDBACK to @{self.current_negotiation_partner}")
-        except Exception as e:
-            self.send_system_message(f"[SYSTEM] Feedback Error: {e}")
+            return end_idx
+
+        # CONFLICT の処理
+        block, end_idx = self.extract_tag_content(clean_text, "[CONFLICT]", "[/CONFLICT]")
+        if block and "[FROM: @" not in block:
+            self._send_to_bus(self.current_negotiation_partner, block)
+            self.log_event(f"Routed FEEDBACK to @{self.current_negotiation_partner}")
+            return end_idx
+            
+        return None
 
     def send_system_message(self, msg):
         try:
@@ -287,7 +329,7 @@ class CIPBridge:
         except Exception: pass
 
     def strip_ansi(self, text):
-        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|[0-?]*[ -/]*[@-~])')
+        ansi_escape = re.compile(r'(?:\x1B[@-Z\\-_]|\x1B\[[0-?]*[ -/]*[@-~]|\x1B\(B|\x1B\[\?25[hl])')
         return ansi_escape.sub('', text)
 
     def run(self):
@@ -314,17 +356,13 @@ class CIPBridge:
             bootstrapped = False
             
             while True:
-                # @intent:fix select にタイムアウトを追加し、ハングアップを防止。
-                #             シグナル受信やバッファ書き込みのタイミング調整を行う。
                 rfds, _, _ = select.select([sys.stdin, self.master_fd, self.pipe_r], [], [], 0.1)
                 
                 if self.pipe_r in rfds:
-                    # パイプが読み込み可能なら読む (ノンブロッキング)
                     try:
-                        os.read(self.pipe_r, 1) 
+                        while True:
+                            if not os.read(self.pipe_r, 1024): break
                     except BlockingIOError: pass
-                    
-                    # メインスレッドで安全に Inbox を処理
                     self.process_inbox()
 
                 if sys.stdin in rfds:
@@ -342,6 +380,9 @@ class CIPBridge:
                     sys.stdout.flush()
 
                     output_buffer += data
+                    if len(output_buffer) > 20000:
+                        output_buffer = output_buffer[-10000:]
+
                     decoded_text = output_buffer.decode('utf-8', errors='ignore')
                     clean_text = self.strip_ansi(decoded_text)
 
@@ -353,11 +394,18 @@ class CIPBridge:
                              self.inject_bootstrap_prompt()
                              output_buffer = b""
 
-                    if "[NEED_CONSENSUS]" in clean_text:
-                        self.route_negotiation(clean_text)
-                        output_buffer = b"" 
-                    elif "[ACCEPTED]" in clean_text or "[CONFLICT]" in clean_text:
-                        self.route_feedback(clean_text)
+                    # Keyword Detection (Block Parsing)
+                    processed_idx = -1
+                    
+                    negotiation_end = self.route_negotiation(clean_text)
+                    if negotiation_end and negotiation_end > processed_idx:
+                        processed_idx = negotiation_end
+                    
+                    feedback_end = self.route_feedback(clean_text)
+                    if feedback_end and feedback_end > processed_idx:
+                        processed_idx = feedback_end
+                        
+                    if processed_idx != -1:
                         output_buffer = b""
 
                     if "Allow execution of:" in clean_text:
@@ -375,7 +423,7 @@ class CIPBridge:
 
 def ensure_gitignore():
     ignore_file = ".gitignore"
-    entries = { "cip_bus/", "bridge_events.log", "*.pid", "*.log", "__pycache__/" }
+    entries = { "cip_bus/", "bridge_events.log", "*.pid", "*.log", "__pycache__/", "current_message.md" }
     current_content = set()
     if os.path.exists(ignore_file):
         with open(ignore_file, "r") as f:
