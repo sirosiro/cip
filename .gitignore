@@ -5,3 +5,4 @@ bridge_events.log
 __pycache__/
 cip_bus/
 sandbox/
+current_message.md
