@@ -5,7 +5,6 @@ import pty
 import tty
 import select
 import termios
-import re
 import signal
 import fcntl
 import struct
@@ -20,7 +19,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--version",
     action="version",
-    version="CIP-Bridge v2.5.3"
+    version="CIP-Bridge v2.5.4"
 )
 parser.parse_args()
 
@@ -33,6 +32,7 @@ else:
 # @intent:responsibility [NEED_CONSENSUS] キーワードを検知し、自律モードへの移行と
 #                         FS-Bus を介したメッセージ転送を制御する。
 #                         また、ウィンドウサイズ変更を透過的に伝播させる。
+#                         正規表現(re)を使用せず、基本的な文字列操作のみでパースを行う。
 
 class CIPBridge:
     def _find_gemini_command(self):
@@ -364,11 +364,43 @@ class CIPBridge:
         except Exception: pass
 
     def strip_ansi(self, text):
-        ansi_escape = re.compile(r'(?:\x1B[@-Z\\-_]|\x1B\[[0-?]*[ -/]*[@-~]|\x1B\(B|\x1B\[\?25[hl])')
-        return ansi_escape.sub('', text)
+        # 正規表現を使わず、ANSIエスケープシーケンスを除去する
+        result = []
+        i = 0
+        n = len(text)
+        while i < n:
+            if text[i] == '\x1b': # ESC
+                i += 1
+                if i < n:
+                    if text[i] == '[': # CSI (Command Sequence Introducer)
+                        i += 1
+                        # 終端文字 (@から~までの文字) までスキップ
+                        while i < n and not ('@' <= text[i] <= '~'):
+                            i += 1
+                        i += 1
+                    elif text[i] == '(': # G0 character set
+                        i += 2
+                    elif '@' <= text[i] <= '_': # Fe escape sequence
+                        i += 1
+                    else:
+                        i += 1
+            else:
+                result.append(text[i])
+                i += 1
+        return "".join(result)
 
     def remove_thinking_block(self, text):
-        return re.sub(r'<thinking>.*?</thinking>', '', text, flags=re.DOTALL)
+        # 正規表現を使わず、<thinking>...</thinking> を除去する
+        while True:
+            start_idx = text.find("<thinking")
+            if start_idx == -1:
+                break
+            end_idx = text.find("</thinking>", start_idx)
+            if end_idx == -1:
+                break
+            # 閉じタグ "</thinking>" は 11文字
+            text = text[:start_idx] + text[end_idx + 11:]
+        return text
 
     def run(self):
         self.setup_bus()
@@ -421,7 +453,11 @@ class CIPBridge:
                     if len(output_buffer) > 20000:
                         output_buffer = output_buffer[-10000:]
 
-                    decoded_text = output_buffer.decode('utf-8', errors='ignore')
+                    try:
+                        decoded_text = output_buffer.decode('utf-8', errors='ignore')
+                    except Exception:
+                        decoded_text = ""
+                    
                     clean_text = self.strip_ansi(decoded_text)
                     clean_text = self.remove_thinking_block(clean_text)
 
