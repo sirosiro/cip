@@ -19,7 +19,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--version",
     action="version",
-    version="CIP-Bridge v2.5.8"
+    version="CIP-Bridge v2.6.8"
 )
 parser.parse_args()
 
@@ -74,6 +74,10 @@ class CIPBridge:
         # 無限ループ防止用のフラグ
         # 直前に受信したメッセージのタイプを記憶する (NEED_CONSENSUS / ACCEPTED / CONFLICT)
         self.last_received_type = None
+        
+        # 送信重複防止用のキャッシュ
+        # 直前に送信したメッセージ内容を保持する
+        self.last_sent_content = None
 
     def log_event(self, msg):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -133,6 +137,13 @@ class CIPBridge:
 
     def remove_ui_noise(self, text):
         # 正規表現を使わず、CLIツール特有のUIノイズ（スピナー、罫線、プロンプト等）を除去する
+        
+        # 1. 過去のターンの出力を切り捨てる (最新のプロンプト以降に限定)
+        prompt_marker = ">   Type your message"
+        p_idx = text.rfind(prompt_marker)
+        if p_idx != -1:
+            text = text[p_idx:]
+
         lines = text.splitlines()
         cleaned_lines = []
         
@@ -154,13 +165,17 @@ class CIPBridge:
             if not stripped:
                 continue
 
-            # 行レベルでのノイズ判定（システムメッセージなど）
-            if ">   Type your message" in stripped: continue
+            # 行レベルでのノイズ判定
             if "Using: " in stripped and ".md file" in stripped: continue
             if "Rebooting the humor module" in stripped: continue
             if "(esc to cancel," in stripped: continue
             if "no sandbox (see /docs)" in stripped: continue
             if "Auto (Gemini 3) /model" in stripped: continue
+            
+            # プロンプト行は削除せず、識別子として残す (Bootstrap検知のため)
+            if ">   Type your message" in stripped:
+                cleaned_lines.append("> ")
+                continue
 
             cleaned_lines.append(temp_line)
         
@@ -204,8 +219,10 @@ class CIPBridge:
                         except ValueError: pass
 
                     notification = f"\n\n[SYSTEM] 新着メッセージがあります。内容を確認するため、以下のコマンドを実行してください。\n\nread_file {self.current_message_path}\n"
+                    
+                    self.log_event("Injecting notification to PTY...")
                     os.write(self.master_fd, notification.encode())
-                    time.sleep(0.1)
+                    time.sleep(0.5) # 遅延を増やして確実性を高める
                     os.write(self.master_fd, ENTER_KEY)
                     
         except Exception as e:
@@ -261,6 +278,7 @@ class CIPBridge:
             "\n"
             "**重要: 交渉プロトコル (The Negotiation Loop)**\n"
             "他ノードとの通信には、以下のXMLライクなタグのいずれかを**必ず**使用してください。\n"
+            "**【厳守】本文の全てをタグの「内側」に記述してください。タグの外に書かれた内容は相手に届きません。**\n"
             "タグはネスト（入れ子）にせず、一回の発言につき一つの目的（要求または応答）のために使用します。\n"
             "タグの開始から終了までは「一つの不可分な操作（トランザクション）」です。中身を書き終えたら、必ず終了タグを閉じてください。\n"
             "**注意: [ACCEPTED] や [CONFLICT] などのタグが開かれたまま [READY] を出力することは禁止です。必ずタグを閉じてから [READY] してください。**\n"
@@ -268,26 +286,28 @@ class CIPBridge:
             "*   **要求/指示 (他ノードへ動いてもらう場合):**\n"
             "    ```\n"
             "    [NEED_CONSENSUS] @target_node\n"
-            "    メッセージ本文...\n"
+            "    メッセージ本文（ここに含まれる内容のみが転送されます）\n"
             "    [/NEED_CONSENSUS]\n"
             "    ```\n"
             "\n"
             "*   **承認 (要求に対する返信):**\n"
             "    ```\n"
             "    [ACCEPTED]\n"
-            "    承知しました...\n"
+            "    承知しました。報告内容：...（ここに含まれる内容のみが転送されます）\n"
             "    [/ACCEPTED]\n"
             "    ```\n"
             "\n"
             "*   **拒否/対案 (要求に対する返信):**\n"
             "    ```\n"
             "    [CONFLICT]\n"
-            "    その方針には懸念があります...\n"
+            "    その方針には懸念があります。理由：...（ここに含まれる内容のみが転送されます）\n"
             "    [/CONFLICT]\n"
             "    ```\n"
             "\n"
             "**重要: 待機義務 (Post-Communication)**\n"
-            "初期化完了の報告（憲法、法律、部下の状況）を行い、**全てのタグを閉じた後、**最後に `[READY]` を出力して待機状態に移行してください。\n"
+            "初期化完了の報告（憲法、法律、部下の状況）は、**タグを使わずに** 画面に出力するだけに留めてください。\n"
+            "まだ上位ノードからの具体的な指示がないため、この段階で `[ACCEPTED]` や `[NEED_CONSENSUS]` などの通信タグを使用してはいけません。\n"
+            "報告を画面に出力し終えたら、最後に `[READY]` を出力して待機状態に移行してください。\n"
             "**`[READY]` を出力した後は、いかなる理由があっても、次の指示があるまで追加の発言、ファイルのリストアップ、提案、調査を一切行わずに沈黙を守ってください。これがあなたの最優先任務です。**\n"
         )
         self.log_event("Injecting bootstrap prompt...")
@@ -314,6 +334,11 @@ class CIPBridge:
             self.log_event(f"Error: Target @{target_id} not found at {target_pid_path}")
             raise FileNotFoundError(f"Target @{target_id} not found.")
 
+        # 重複送信防止ロジック: 前回の内容と完全に一致、または前回内容が今回内容を含んでいる場合はスキップ
+        # (ストリームの伸長は許可するが、全く同じものや、以前送ったものの一部を再送しない)
+        if self.last_sent_content and content.strip() == self.last_sent_content:
+             return target_id
+
         with open(target_pid_path, "r") as f:
             target_pid = int(f.read().strip())
         
@@ -324,6 +349,7 @@ class CIPBridge:
             f.flush()
             os.fsync(f.fileno())
         
+        self.last_sent_content = content.strip()
         os.kill(target_pid, signal.SIGUSR1)
         return target_id
 
@@ -337,7 +363,7 @@ class CIPBridge:
             
             extracted_block = text[content_start:content_end]
             return extracted_block, content_end
-        except ValueError: 
+        except ValueError:
             return None, -1
 
     def route_negotiation(self, clean_text):
@@ -370,10 +396,16 @@ class CIPBridge:
         return None
 
     def route_feedback(self, clean_text):
+        if "[ACCEPTED]" in clean_text:
+             if not self.current_negotiation_partner:
+                 self.log_event("Debug: [ACCEPTED] found but no partner.")
+             # else:
+             #    self.log_event(f"Debug: Partner is {self.current_negotiation_partner}")
+
         if not self.current_negotiation_partner:
             if "[ACCEPTED]" in clean_text or "[CONFLICT]" in clean_text:
                 if "[FROM: @" in clean_text: return None
-                self.log_event("Debug: Feedback detected but no negotiation partner set.")
+                # self.log_event("Debug: Feedback detected but no negotiation partner set.")
             return None
         
         # ACCEPTED の処理
@@ -514,25 +546,31 @@ class CIPBridge:
                     except Exception:
                         decoded_text = ""
                     
+                    # パース前にUIノイズ除去と履歴の切り捨てを適用
+                    # これにより、画面に残っている過去の閉じタグとの誤マッチを防ぐ
                     clean_text = self.strip_ansi(decoded_text)
                     clean_text = self.remove_thinking_block(clean_text)
-
+                    
                     if not bootstrapped:
+                        # Bootstrap検知はUIノイズ除去前のテキストで行う
                         if "> " in clean_text:
                              bootstrapped = True
                              self.log_event("Prompt detected. Starting bootstrap...")
                              time.sleep(1.0)
                              self.inject_bootstrap_prompt()
                              output_buffer = b""
+                    
+                    # パース用にはUIノイズを除去したテキストを使用
+                    parsed_text = self.remove_ui_noise(clean_text)
 
                     # Keyword Detection (Block Parsing)
                     processed_idx = -1
                     
-                    negotiation_end = self.route_negotiation(clean_text)
+                    negotiation_end = self.route_negotiation(parsed_text)
                     if negotiation_end and negotiation_end > processed_idx:
                         processed_idx = negotiation_end
                     
-                    feedback_end = self.route_feedback(clean_text)
+                    feedback_end = self.route_feedback(parsed_text)
                     if feedback_end and feedback_end > processed_idx:
                         processed_idx = feedback_end
                         
