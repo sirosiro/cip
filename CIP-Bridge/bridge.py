@@ -12,7 +12,17 @@ import struct
 import time
 import platform
 import shutil
+import argparse
 from collections import deque
+
+# コマンドオプション(バージョン表示とパス設定確認用)
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--version",
+    action="version",
+    version="CIP-Bridge v2.5.3"
+)
+parser.parse_args()
 
 # OSに応じた改行コード（Enterキー）の定義
 if platform.system() == "Windows":
@@ -48,7 +58,7 @@ class CIPBridge:
         self.inbox_path = os.path.join(self.bus_dir, "inbox")
         self.pid_path = os.path.join(self.bus_dir, "bridge.pid")
         
-        # @intent:fix Pull型通信用のメッセージ閲覧ファイル
+        # Pull型通信用のメッセージ閲覧ファイル
         self.current_message_path = "current_message.md"
         
         self.mode = "BYPASS"
@@ -143,7 +153,6 @@ class CIPBridge:
                             self.log_event(f"Set negotiation partner to @{self.current_negotiation_partner}")
                         except ValueError: pass
 
-                    # 通知メッセージを強調。AIが確実にコマンドを実行するように誘導する。
                     notification = f"\n\n[SYSTEM] 新着メッセージがあります。内容を確認するため、以下のコマンドを実行してください。\n\nread_file {self.current_message_path}\n"
                     os.write(self.master_fd, notification.encode())
                     time.sleep(0.1)
@@ -182,50 +191,54 @@ class CIPBridge:
             parent_dir = os.path.dirname(parent_dir)
 
     def inject_bootstrap_prompt(self):
-        prompt = """
-[SYSTEM: Context Initialization]
-あなたはCIPエコシステムのノードとして起動しました。
-現在のカレントディレクトリ（担当領域）を確認し、以下の手順で自身の役割を自律的に決定してください。
-
-1. **憲法の確認 (Global Philosophy):**
-   ルートの設計思想が存在するか確認し、ロードしてください。
-   `$ ls -l DESIGN_PHILOSOPHY.md` (シンボリックリンクなら `cat`, 実体なら `read_file`)
-
-2. **法律の確認 (Local Manifest):**
-   このディレクトリのアーキテクチャ定義（`ARCHITECTURE_MANIFEST.md`）をロードしてください。
-
-3. **部下の確認 (Sub-Node Discovery):**
-   さらに下位のディレクトリ（サブモジュール）が存在するか確認してください。
-   もし存在すれば、あなたはそれらのリーダー（Local Leader）としての責務も負います。
-
-**重要: 交渉プロトコル (The Negotiation Loop)**
-他ノードとの通信には、以下のXMLライクなタグを**必ず**使用してください。タグで囲まれていないメッセージは相手に届きません。
-
-*   **要求/指示:**
-    ```
-    [NEED_CONSENSUS] @target_node
-    メッセージ本文...
-    [/NEED_CONSENSUS]
-    ```
-
-*   **承認:**
-    ```
-    [ACCEPTED]
-    承知しました...
-    [/ACCEPTED]
-    ```
-
-*   **拒否/対案:**
-    ```
-    [CONFLICT]
-    その方針には懸念があります...
-    [/CONFLICT]
-    ```
-
-**重要: 初期化完了後の待機義務**
-全ての確認が完了したら、現在の役割（Worker / Local Leader / Root Leader）と準備完了の旨を `[READY]` と共に出力し、**それ以外の発言やアクションは一切行わずに待機してください。**
-指示があるまで沈黙を守ることが、あなたの最優先任務です。
-"""
+        prompt = (
+            "[SYSTEM: Context Initialization]\n"
+            "あなたはCIPエコシステムのノードとして起動しました。\n"
+            "現在のカレントディレクトリ（担当領域）を確認し、以下の手順で自身の役割を自律的に決定してください。\n"
+            "\n"
+            "1. **憲法の確認 (Global Philosophy):**\n"
+            "   ルートの設計思想が存在するか確認し、ロードしてください。\n"
+            "   `$ ls -l DESIGN_PHILOSOPHY.md` (シンボリックリンクなら `cat`, 実体なら `read_file`)\n"
+            "   **重要: ロードした内容に基づいた分析、考古学的調査、または追加の行動をこの段階で開始してはなりません。**\n"
+            "\n"
+            "2. **法律の確認 (Local Manifest):**\n"
+            "   このディレクトリのアーキテクチャ定義（`ARCHITECTURE_MANIFEST.md`）をロードしてください。\n"
+            "   **重要: マニフェストが存在しない場合も、その事実を認識するに留め、不足を補うための自律的な調査を行わないでください。**\n"
+            "\n"
+            "3. **部下の確認 (Sub-Node Discovery):**\n"
+            "   さらに下位のディレクトリ（サブモジュール）が存在するか確認してください。\n"
+            "   もし存在すれば、あなたはそれらのリーダー（Local Leader）としての責務も負います。\n"
+            "\n"
+            "**重要: 交渉プロトコル (The Negotiation Loop)**\n"
+            "他ノードとの通信には、以下のXMLライクなタグのいずれかを**必ず**使用してください。\n"
+            "タグはネスト（入れ子）にせず、一回の発言につき一つの目的（要求または応答）のために使用します。\n"
+            "タグの開始から終了までは「一つの不可分な操作（トランザクション）」です。中身を書き終えたら、必ず終了タグを閉じてください。\n"
+            "\n"
+            "*   **要求/指示 (他ノードへ動いてもらう場合):**\n"
+            "    ```\n"
+            "    [NEED_CONSENSUS] @target_node\n"
+            "    メッセージ本文...\n"
+            "    [/NEED_CONSENSUS]\n"
+            "    ```\n"
+            "\n"
+            "*   **承認 (要求に対する返信):**\n"
+            "    ```\n"
+            "    [ACCEPTED]\n"
+            "    承知しました...\n"
+            "    [/ACCEPTED]\n"
+            "    ```\n"
+            "\n"
+            "*   **拒否/対案 (要求に対する返信):**\n"
+            "    ```\n"
+            "    [CONFLICT]\n"
+            "    その方針には懸念があります...\n"
+            "    [/CONFLICT]\n"
+            "    ```\n"
+            "\n"
+            "**重要: 待機義務 (Post-Communication)**\n"
+            "初期化完了の報告（憲法、法律、部下の状況）を行い、最後に `[READY]` を出力して待機状態に移行してください。\n"
+            "**`[READY]` を出力した後は、いかなる理由があっても、次の指示があるまで追加の発言、ファイルのリストアップ、提案、調査を一切行わずに沈黙を守ってください。これがあなたの最優先任務です。**\n"
+        )
         self.log_event("Injecting bootstrap prompt...")
         try:
             with open(self.current_message_path, "w") as f:
@@ -247,6 +260,7 @@ class CIPBridge:
         target_inbox_path = os.path.join(target_dir, "inbox")
 
         if not os.path.exists(target_pid_path):
+            self.log_event(f"Error: Target @{target_id} not found at {target_pid_path}")
             raise FileNotFoundError(f"Target @{target_id} not found.")
 
         with open(target_pid_path, "r") as f:
@@ -263,7 +277,6 @@ class CIPBridge:
         return target_id
 
     def extract_tag_content(self, text, start_tag, end_tag):
-        # 文字列操作による堅牢なタグ抽出
         try:
             start_idx = text.index(start_tag)
             end_idx = text.index(end_tag, start_idx + len(start_tag))
@@ -283,7 +296,10 @@ class CIPBridge:
         block, end_idx = self.extract_tag_content(clean_text, start_tag, end_tag)
         if not block: return None 
 
-        if "[FROM: @" in block: return None # 受信メッセージの表示は無視
+        # 受信メッセージの無視: ブロック内に他人の [FROM: @ がある場合は無視
+        # ただし、自分のID (self.bus_id) の FROM タグは許容する（自己署名）
+        if "[FROM: @" in block and f"[FROM: @{self.bus_id}]" not in block:
+             return None
 
         try:
             lines = block.splitlines()
@@ -297,26 +313,44 @@ class CIPBridge:
                 self.current_negotiation_partner = target_id
                 self.log_event(f"Routed [NEED_CONSENSUS] to @{target_id}")
                 return end_idx
-        except Exception: pass
+        except Exception as e:
+            self.log_event(f"Negotiation routing error: {e}")
         
         return None
 
     def route_feedback(self, clean_text):
-        if not self.current_negotiation_partner: return None
+        if not self.current_negotiation_partner:
+            if "[ACCEPTED]" in clean_text or "[CONFLICT]" in clean_text:
+                if "[FROM: @" in clean_text: return None
+                self.log_event("Debug: Feedback detected but no negotiation partner set.")
+            return None
         
         # ACCEPTED の処理
         block, end_idx = self.extract_tag_content(clean_text, "[ACCEPTED]", "[/ACCEPTED]")
-        if block and "[FROM: @" not in block:
-            self._send_to_bus(self.current_negotiation_partner, block)
-            self.log_event(f"Routed FEEDBACK to @{self.current_negotiation_partner}")
-            return end_idx
+        if block:
+            # 他人の発言（受信メッセージ）は無視。自分のIDならOK。
+            if "[FROM: @" not in block or f"[FROM: @{self.bus_id}]" in block:
+                try:
+                    self._send_to_bus(self.current_negotiation_partner, block)
+                    self.log_event(f"Routed FEEDBACK to @{self.current_negotiation_partner}")
+                    return end_idx
+                except Exception as e:
+                    self.log_event(f"Feedback routing error: {e}")
+            else:
+                return end_idx
 
         # CONFLICT の処理
         block, end_idx = self.extract_tag_content(clean_text, "[CONFLICT]", "[/CONFLICT]")
-        if block and "[FROM: @" not in block:
-            self._send_to_bus(self.current_negotiation_partner, block)
-            self.log_event(f"Routed FEEDBACK to @{self.current_negotiation_partner}")
-            return end_idx
+        if block:
+            if "[FROM: @" not in block or f"[FROM: @{self.bus_id}]" in block:
+                try:
+                    self._send_to_bus(self.current_negotiation_partner, block)
+                    self.log_event(f"Routed FEEDBACK to @{self.current_negotiation_partner}")
+                    return end_idx
+                except Exception as e:
+                    self.log_event(f"Feedback routing error: {e}")
+            else:
+                return end_idx
             
         return None
 
@@ -332,6 +366,9 @@ class CIPBridge:
     def strip_ansi(self, text):
         ansi_escape = re.compile(r'(?:\x1B[@-Z\\-_]|\x1B\[[0-?]*[ -/]*[@-~]|\x1B\(B|\x1B\[\?25[hl])')
         return ansi_escape.sub('', text)
+
+    def remove_thinking_block(self, text):
+        return re.sub(r'<thinking>.*?</thinking>', '', text, flags=re.DOTALL)
 
     def run(self):
         self.setup_bus()
@@ -386,6 +423,7 @@ class CIPBridge:
 
                     decoded_text = output_buffer.decode('utf-8', errors='ignore')
                     clean_text = self.strip_ansi(decoded_text)
+                    clean_text = self.remove_thinking_block(clean_text)
 
                     if not bootstrapped:
                         if "> " in clean_text:
@@ -424,7 +462,8 @@ class CIPBridge:
 
 def ensure_gitignore():
     ignore_file = ".gitignore"
-    entries = { "cip_bus/", "bridge_events.log", "*.pid", "*.log", "__pycache__/", "current_message.md" }
+    # current_message.md は .gitignore に追加しない（AIの可視性確保のため）
+    entries = { "cip_bus/", "bridge_events.log", "*.pid", "*.log", "__pycache__/" }
     current_content = set()
     if os.path.exists(ignore_file):
         with open(ignore_file, "r") as f:
