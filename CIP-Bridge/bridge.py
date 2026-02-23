@@ -19,7 +19,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--version",
     action="version",
-    version="CIP-Bridge v2.5.4"
+    version="CIP-Bridge v2.5.8"
 )
 parser.parse_args()
 
@@ -70,6 +70,10 @@ class CIPBridge:
         fcntl.fcntl(self.pipe_w, fcntl.F_SETFL, os.O_NONBLOCK)
 
         self.current_negotiation_partner = None
+        
+        # 無限ループ防止用のフラグ
+        # 直前に受信したメッセージのタイプを記憶する (NEED_CONSENSUS / ACCEPTED / CONFLICT)
+        self.last_received_type = None
 
     def log_event(self, msg):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -127,6 +131,41 @@ class CIPBridge:
                 os.write(self.pipe_w, b"x")
             except Exception: pass
 
+    def remove_ui_noise(self, text):
+        # 正規表現を使わず、CLIツール特有のUIノイズ（スピナー、罫線、プロンプト等）を除去する
+        lines = text.splitlines()
+        cleaned_lines = []
+        
+        # 点字スピナーパターン + Sparkle(✦)
+        braille_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✦"
+        # 罫線パターン
+        border_chars = "╭─╮│╰╯"
+        
+        for line in lines:
+            # 行全体を削除するのではなく、ノイズ文字だけを除去する
+            # これにより、ノイズと同じ行にあるタグやテキストを救出する
+            temp_line = line
+            for c in braille_chars:
+                temp_line = temp_line.replace(c, "")
+            for c in border_chars:
+                temp_line = temp_line.replace(c, "")
+            
+            stripped = temp_line.strip()
+            if not stripped:
+                continue
+
+            # 行レベルでのノイズ判定（システムメッセージなど）
+            if ">   Type your message" in stripped: continue
+            if "Using: " in stripped and ".md file" in stripped: continue
+            if "Rebooting the humor module" in stripped: continue
+            if "(esc to cancel," in stripped: continue
+            if "no sandbox (see /docs)" in stripped: continue
+            if "Auto (Gemini 3) /model" in stripped: continue
+
+            cleaned_lines.append(temp_line)
+        
+        return "\n".join(cleaned_lines)
+
     def process_inbox(self):
         try:
             with open(self.inbox_path, "r+") as f:
@@ -138,18 +177,29 @@ class CIPBridge:
                     os.fsync(f.fileno())
                     
                     self.log_event(f"Processing inbox message (len: {len(content)})")
+                    
+                    # 受信時にUIノイズを除去してから保存
+                    clean_content = self.remove_ui_noise(content)
+
+                    # メッセージタイプの記録（無限ループ防止用）
+                    if "[NEED_CONSENSUS]" in clean_content:
+                        self.last_received_type = "NEED_CONSENSUS"
+                    elif "[ACCEPTED]" in clean_content:
+                        self.last_received_type = "ACCEPTED"
+                    elif "[CONFLICT]" in clean_content:
+                        self.last_received_type = "CONFLICT"
 
                     with open(self.current_message_path, "w") as cf:
-                        cf.write(content)
+                        cf.write(clean_content)
                         cf.flush()
                         os.fsync(cf.fileno())
 
-                    if "[FROM: @" in content:
+                    if "[FROM: @" in clean_content:
                         try:
                             start_tag = "[FROM: @"
-                            start_idx = content.index(start_tag) + len(start_tag)
-                            end_idx = content.index("]", start_idx)
-                            self.current_negotiation_partner = content[start_idx:end_idx]
+                            start_idx = clean_content.index(start_tag) + len(start_tag)
+                            end_idx = clean_content.index("]", start_idx)
+                            self.current_negotiation_partner = clean_content[start_idx:end_idx]
                             self.log_event(f"Set negotiation partner to @{self.current_negotiation_partner}")
                         except ValueError: pass
 
@@ -213,6 +263,7 @@ class CIPBridge:
             "他ノードとの通信には、以下のXMLライクなタグのいずれかを**必ず**使用してください。\n"
             "タグはネスト（入れ子）にせず、一回の発言につき一つの目的（要求または応答）のために使用します。\n"
             "タグの開始から終了までは「一つの不可分な操作（トランザクション）」です。中身を書き終えたら、必ず終了タグを閉じてください。\n"
+            "**注意: [ACCEPTED] や [CONFLICT] などのタグが開かれたまま [READY] を出力することは禁止です。必ずタグを閉じてから [READY] してください。**\n"
             "\n"
             "*   **要求/指示 (他ノードへ動いてもらう場合):**\n"
             "    ```\n"
@@ -236,7 +287,7 @@ class CIPBridge:
             "    ```\n"
             "\n"
             "**重要: 待機義務 (Post-Communication)**\n"
-            "初期化完了の報告（憲法、法律、部下の状況）を行い、最後に `[READY]` を出力して待機状態に移行してください。\n"
+            "初期化完了の報告（憲法、法律、部下の状況）を行い、**全てのタグを閉じた後、**最後に `[READY]` を出力して待機状態に移行してください。\n"
             "**`[READY]` を出力した後は、いかなる理由があっても、次の指示があるまで追加の発言、ファイルのリストアップ、提案、調査を一切行わずに沈黙を守ってください。これがあなたの最優先任務です。**\n"
         )
         self.log_event("Injecting bootstrap prompt...")
@@ -286,7 +337,7 @@ class CIPBridge:
             
             extracted_block = text[content_start:content_end]
             return extracted_block, content_end
-        except ValueError:
+        except ValueError: 
             return None, -1
 
     def route_negotiation(self, clean_text):
@@ -328,6 +379,11 @@ class CIPBridge:
         # ACCEPTED の処理
         block, end_idx = self.extract_tag_content(clean_text, "[ACCEPTED]", "[/ACCEPTED]")
         if block:
+            # 無限ループ防止: 直前に受信したのが ACCEPTED なら、返信としての ACCEPTED は転送しない
+            if self.last_received_type == "ACCEPTED":
+                self.log_event("Loop prevention: Blocked redundant ACCEPTED feedback.")
+                return end_idx
+
             # 他人の発言（受信メッセージ）は無視。自分のIDならOK。
             if "[FROM: @" not in block or f"[FROM: @{self.bus_id}]" in block:
                 try:
