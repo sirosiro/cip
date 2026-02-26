@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# CIP-Bridge: Fractal AI Orchestrator
+# Licensed under the MIT License. See LICENSE file in the project root for full license information.
+# Copyright (c) 2026 Kouichi Shiroma
+
 import sys
 import os
 
