@@ -108,6 +108,9 @@ class BridgeCore:
         self.inject_notification()
 
     def inject_notification(self):
+        # @intent:responsibility AIに新着メッセージの確認を促す。
+        # @intent:rationale Gemini CLIのプロンプト状態をリセットするために \x15 (CTRL+U) を送り、
+        #                   実行を確実にするために適度な待機 (time.sleep) と空の改行を組み合わせる。
         if not self.master_fd: return
         time.sleep(0.5)
         msg = f"\x15\r\n[SYSTEM] 新着メッセージがあります。画面にエコーしないで read_file で {self.current_message_path} を読め\r"
@@ -177,6 +180,7 @@ class BridgeCore:
             with open(self.current_message_path, "w") as f:
                 f.write(prompt.strip())
             
+            # @intent:responsibility 起動時にAIに対してCIPノードとしての振る舞いを注入する。
             time.sleep(0.5)
             notification = f"[SYSTEM] 初期化コンテキストを受信しました。画面にエコーしないで read_file で {self.current_message_path} を読め\r"
             os.write(self.master_fd, notification.encode('utf-8'))
@@ -187,6 +191,7 @@ class BridgeCore:
             self.log_event(f"Failed to inject bootstrap prompt: {e}")
 
     def run(self):
+        # @intent:responsibility メインのイベントループ。標準入力、PTY出力、自己パイプを監視する。
         self.transport.setup()
         self.setup_philosophy_link()
         
@@ -220,7 +225,8 @@ class BridgeCore:
                         while True:
                             if not os.read(self.pipe_r, 1024): break
                     except (BlockingIOError, OSError): pass
-                    # 新着メッセージ受信時はバッファをクリア（過去の出力をリセット）
+                    # @intent:rationale 新着メッセージ受信時は、AI側のプロンプト入力と同期させるため
+                    #                   過去の出力を一旦リセットする。
                     output_buffer = b""
                     self.process_inbox()
 
@@ -276,7 +282,8 @@ class BridgeCore:
                                     else:
                                         self.log_event(f"Failed to send {packet.type} to @{target}")
                         
-                        # 【改善】最後に処理したパケットの終了タグ以降の部分を残す
+                        # @intent:rationale AIが連続して出力した [READY] などの後続データを失わないよう
+                        #                   最後に処理したパケットの終了タグ以降の部分のみをバッファに残す。
                         last_packet = packets[-1]
                         end_marker = f"[/{last_packet.type}]"
                         last_pos = decoded_text.rfind(end_marker)

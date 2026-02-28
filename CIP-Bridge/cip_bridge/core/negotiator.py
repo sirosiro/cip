@@ -37,10 +37,13 @@ class NegotiationManager:
     # @intent:responsibility 送信するパケットに基づいて内部状態を更新し、履歴に記録する。
     def update_state(self, packet: Packet):
         """自分がパケットを送信（転送）した直後に呼ばれ、状態を更新する。"""
+        # @intent:rationale 自分が発信した内容を「過去の送信履歴」としてハッシュ管理することで、
+        #                   バッファの再送による不要な重複送信を防止する。
         self.last_sent_type = packet.type
         # last_received_type は受信時のみ更新されるべきなので、ここでは触らない
 
-        # 新しいリクエストを開始する場合は、重複排除の履歴をクリアする
+        # @intent:rationale 新しいリクエストを開始する場合は、以前のトランザクションの履歴を
+        #                   クリアし、同じ定型文での応答を再び許可する。
         if packet.type == "NEED_CONSENSUS":
             self.reset_history()
         
@@ -59,7 +62,7 @@ class NegotiationManager:
     # @intent:responsibility 受信したメッセージのタイプを記録する。
     def record_receive(self, packet_type: str):
         self.last_received_type = packet_type
-        # 相手から新しいリクエストが来た場合も、履歴をリセットして応答を許可する
+        # @intent:rationale 相手から新しいリクエストが来た場合も、履歴をリセットして応答を許可する。
         if packet_type == "NEED_CONSENSUS":
             self.reset_history()
 
@@ -77,8 +80,9 @@ class NegotiationManager:
             return False
 
         # 2. 交渉プロトコル上の無限ループ防止 (ACCEPTED のエコーバック等)
+        # @intent:rationale 相手から ACCEPTED をもらった直後に自分が自動的に ACCEPTED を出すのは
+        #                   エコーバック（または意図しない連鎖）の可能性が高いためブロックする。
         if packet.type == "ACCEPTED" and self.last_received_type == "ACCEPTED":
-            # 相手から ACCEPTED をもらった直後に自分が ACCEPTED を出すのはエコーの可能性が高い
             return False
             
         return True

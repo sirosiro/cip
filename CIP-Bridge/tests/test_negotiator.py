@@ -10,11 +10,11 @@ class TestNegotiationManager(unittest.TestCase):
         pkt = Packet(type="NEED_CONSENSUS", content="Request", target_id="target_node")
         self.nego.update_state(pkt)
         self.assertEqual(self.nego.get_partner(), "target_node")
-        # Test expects this based on legacy or simplified contract
-        self.assertEqual(self.nego.last_received_type, "NEED_CONSENSUS")
+        # Transmitter's update_state should NOT change the last_received_type.
+        # It should only be updated by record_receive.
+        self.assertIsNone(self.nego.last_received_type)
         
-        pkt_reply = Packet(type="ACCEPTED", content="Ok")
-        self.nego.update_state(pkt_reply)
+        self.nego.record_receive("ACCEPTED")
         self.assertEqual(self.nego.last_received_type, "ACCEPTED")
 
     def test_routing_logic(self):

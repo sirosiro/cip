@@ -4,6 +4,8 @@
 
 def strip_ansi(text: str) -> str:
     """正規表現を使わず、ANSIエスケープシーケンスを除去する"""
+    # @intent:rationale reモジュールを使用せず、ステートマシン的にエスケープシーケンスを走査・除去
+    #                   ことで、解析の確実性とパフォーマンスを両立する。
     result = []
     i = 0
     n = len(text)
@@ -61,6 +63,8 @@ def remove_ui_noise(text: str) -> str:
         stripped = temp_line.strip()
         
         # 【重要】タグが含まれる行は、装飾があっても削除せずに保護する
+        # @intent:rationale Gemini CLI の枠線装飾（│ > 等）により、重要なパケットがノイズとして
+        #                   削除されるのを防ぐ。エコーバックの抑制は ProtocolStack 層で担保する。
         if "[" in line:
             cleaned_lines.append(temp_line)
             continue

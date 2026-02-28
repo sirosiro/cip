@@ -39,6 +39,8 @@ class ProtocolStack:
     #                         に従ってタグ付きメッセージをパースする。
     def parse(self, raw_text: str) -> List[Packet]:
         """テキストからCIPプロトコルのタグを抽出し、Packetオブジェクトのリストを返す。"""
+        # @intent:rationale ストリーミング出力やターミナルの再描画によるノイズ（エコー）を
+        #                   コンテンツベースで排除し、純粋な「意図」のみを抽出する。
         clean_text = self.preprocess_text(raw_text)
         packets = []
         last_end_idx = 0
@@ -71,8 +73,10 @@ class ProtocolStack:
 
             block = clean_text[start_idx:end_idx]
             
-            # エコー回避: [FROM: @...] が含まれているブロックは他者のエコー。
-            # ただし、自分のIDが署名されている場合は、自分が再出力したものなので許可する。
+            # @intent:responsibility 他者からのエコーバックによる無限ループを防止する。
+            # @intent:rationale [FROM: @...] が含まれているブロックは他者のメッセージの再表示（echo）
+            #                   とみなして無視する。ただし、自分のIDが署名されている場合は、
+            #                   自分自身の出力であることを保証するため、転送を許可する。
             if "[FROM: @" in block:
                 my_signature = f"[FROM: @{self.my_id}]"
                 if my_signature not in block:
