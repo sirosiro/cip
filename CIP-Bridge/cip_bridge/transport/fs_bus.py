@@ -20,9 +20,6 @@ class FSBus(MessageBus):
         self.inbox_path = os.path.join(self.bus_dir, "inbox")
         self.pid_path = os.path.join(self.bus_dir, "bridge.pid")
         self.logger = logger
-        
-        # 重複送信防止用のキャッシュ
-        self.last_sent_content: Optional[str] = None
 
     def _log(self, msg: str):
         if self.logger:
@@ -97,10 +94,6 @@ class FSBus(MessageBus):
             self._log(f"Error: Target @{target_id} not found at {target_pid_path}")
             return False
 
-        # 重複送信防止
-        if self.last_sent_content and content.strip() == self.last_sent_content:
-             return True
-
         try:
             with open(target_pid_path, "r") as f:
                 target_pid = int(f.read().strip())
@@ -111,7 +104,6 @@ class FSBus(MessageBus):
                 f.flush()
                 os.fsync(f.fileno())
             
-            self.last_sent_content = content.strip()
             self.notify(target_id, pid=target_pid)
             return True
             

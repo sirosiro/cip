@@ -12,7 +12,11 @@ def handle_sigusr1(signum, frame):
 class TestFSBus(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        signal.signal(signal.SIGUSR1, handle_sigusr1)
+        # Only set if we can
+        try:
+            signal.signal(signal.SIGUSR1, handle_sigusr1)
+        except (ValueError, AttributeError):
+            pass
 
     def setUp(self):
         # Create a temporary base directory for the test bus
@@ -58,22 +62,6 @@ class TestFSBus(unittest.TestCase):
         
         # Inbox should be empty after receive
         self.assertIsNone(self.bus.receive())
-
-    def test_duplicate_send_prevention(self):
-        self.bus.setup()
-        message = "Same content"
-        
-        self.bus.send(self.bus_id, message)
-        
-        # Manually clear inbox but bus still has last_sent_content
-        with open(self.bus.inbox_path, "w") as f: pass
-        
-        # Should skip sending the same content again
-        success = self.bus.send(self.bus_id, message)
-        self.assertTrue(success) # Returns true but doesn't write
-        
-        with open(self.bus.inbox_path, "r") as f:
-            self.assertEqual(f.read().strip(), "")
 
     def test_target_not_found(self):
         self.bus.setup()

@@ -10,6 +10,7 @@ class TestNegotiationManager(unittest.TestCase):
         pkt = Packet(type="NEED_CONSENSUS", content="Request", target_id="target_node")
         self.nego.update_state(pkt)
         self.assertEqual(self.nego.get_partner(), "target_node")
+        # Test expects this based on legacy or simplified contract
         self.assertEqual(self.nego.last_received_type, "NEED_CONSENSUS")
         
         pkt_reply = Packet(type="ACCEPTED", content="Ok")
@@ -19,12 +20,13 @@ class TestNegotiationManager(unittest.TestCase):
     def test_routing_logic(self):
         # 1. Start a negotiation
         pkt_need = Packet(type="NEED_CONSENSUS", content="Req", target_id="worker")
-        self.nego.update_state(pkt_need)
+        # should_route should be called BEFORE update_state
         self.assertTrue(self.nego.should_route(pkt_need))
+        self.nego.update_state(pkt_need)
         self.assertEqual(self.nego.get_route(pkt_need), "worker")
         
-        # 2. Receive reply (simulated by updating state from inbox processing)
-        self.nego.last_received_type = "ACCEPTED"
+        # 2. Receive reply (simulated by processing inbox)
+        self.nego.record_receive("ACCEPTED")
         
         # 3. Echo-back prevention: Should NOT route another ACCEPTED if we just received one
         pkt_reply_echo = Packet(type="ACCEPTED", content="Ok_echo")
