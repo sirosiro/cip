@@ -39,11 +39,11 @@
 
 `DESIGN_PHILOSOPHY.md` に基づき、各CIPは以下の形式で対話する。
 
-1. **Demand:** Leaderが `[NEED_CONSENSUS] @<WorkerID> <Content>` を出力。
+1. **Demand:** Leaderが `[NEED_CONSENSUS] @<WorkerID> <Content> [/NEED_CONSENSUS]` を出力。
 2. **Routing:** `CIP-Bridge` が指定IDの `inbox` へ転送。
-3. **Audit:** Workerが内容を吟味し、`[CONFLICT] <Reason>` または `[ACCEPTED]` を出力。
+3. **Audit:** Workerが内容を吟味し、`[CONFLICT] <Reason> [/CONFLICT]` または `[ACCEPTED] [/ACCEPTED]` を出力。
 4. **Feedback:** `CIP-Bridge` が上記を Leader の `inbox` へ書き戻し、`SIGUSR1` を送信。
-5. **Resolution:** 全ての `[ACCEPTED]` を確認後、Leaderが最終案をまとめ `[COMPLETED]` を出力。
+5. **Resolution:** 全ての `[ACCEPTED] [/ACCEPTED]` を確認後、Leaderが最終案をまとめ `[COMPLETED]` を出力。
 
 ---
 
@@ -96,11 +96,11 @@
 
 ---
 
-## 6. DESIGN_PHILOSOPHY.md への追記（推奨）
+## 6. DESIGN_PHILOSOPHY.md との連動仕様
 
-本ツールを駆動させるため、CIPには以下の振る舞いを定義する。
+本ツールを駆動させるため、CIPの `DESIGN_PHILOSOPHY.md` (第7章) には既に以下の振る舞いが定義・反映されている。
 
-* 「あなたは `[NEED_CONSENSUS]` を使うことで、配下の専門家に詳細設計を委託できる」
+* 「あなたは `[NEED_CONSENSUS]...[/NEED_CONSENSUS]` を使うことで、配下の専門家に詳細設計を委託できる」
 * 「専門家が不在であると通知された場合、あなたがその役割を兼務し、核心的意図を維持せよ」
 
 ---
