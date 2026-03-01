@@ -56,15 +56,38 @@ class BridgeCore:
             f.write(f"[{timestamp}] [BridgeCore:{self.bus_id}] {message}\n")
 
     def setup_philosophy_link(self):
-        """DESIGN_PHILOSOPHY.md へのシンボリックリンクを作成する。"""
-        target = "../DESIGN_PHILOSOPHY.md"
-        link_name = "DESIGN_PHILOSOPHY.md"
-        if os.path.exists(target) and not os.path.exists(link_name):
+        """DESIGN_PHILOSOPHY.md および docs ディレクトリへのシンボリックリンクを作成する。"""
+        # 1. 憲法 (DESIGN_PHILOSOPHY.md) のリンク
+        target_md = "../DESIGN_PHILOSOPHY.md"
+        link_md = "DESIGN_PHILOSOPHY.md"
+        if os.path.exists(target_md) and not os.path.exists(link_md):
             try:
-                os.symlink(target, link_name)
-                self.log_event(f"Linked DESIGN_PHILOSOPHY.md from {target}")
+                os.symlink(target_md, link_md)
+                self.log_event(f"Linked DESIGN_PHILOSOPHY.md from {target_md}")
             except Exception as e:
                 self.log_event(f"Failed to link DESIGN_PHILOSOPHY.md: {e}")
+                
+        # 2. ドキュメントレジストリ (_docs) のリンク
+        # @intent:rationale フラクタル構造下で、下位ノードのAIが CIP_Scriber 等の
+        #                   グローバルな仕様書にアクセスできるようにするため。
+        target_docs = "../docs"
+        link_docs = "_docs"
+        
+        # ルートの docs を探索 (最大10階層上まで)
+        search_dir = ".."
+        found_docs = False
+        for _ in range(10):
+            potential_docs = os.path.join(search_dir, "docs")
+            if os.path.exists(potential_docs) and os.path.isdir(potential_docs):
+                if not os.path.exists(link_docs):
+                    try:
+                        os.symlink(potential_docs, link_docs)
+                        self.log_event(f"Linked _docs from {potential_docs}")
+                    except Exception as e:
+                        self.log_event(f"Failed to link _docs: {e}")
+                found_docs = True
+                break
+            search_dir = os.path.join(search_dir, "..")
 
     def handle_signal(self, signum, frame):
         os.write(self.pipe_w, b"\x00")
