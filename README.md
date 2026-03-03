@@ -1,10 +1,11 @@
-# AI協調開発フレームワーク (AI Collaborative Development Framework)
+# 持たざる者の最強武器になり得るか！？ AI協調開発フレームワーク (AI Collaborative Development Framework)
+
 
 <p align="center">
   <img src="./docs/assets/cip_logo.png" alt="CIP Logo" width="300">
 </p>
 
-本プロジェクトは、人間とAIが「設計意図（Intent）」を核に協力し、高品質で持続可能なソフトウェアを開発するためのフレームワークです。ここではこの手法を **Core-Intent Prompting (CIP)** と呼びます。
+本プロジェクトは、人間とAIが「設計意図（Intent）」を核に協力し、高品質で持続可能なソフトウェアを開発するためのフレームワークです。ここではこの手法を **Core-Intent Prompting (CIP)** と呼びます。また、全く個人の趣味で作成している環境のため動作保証はできかねますのでご了承ください。
 
 ## コンセプト
 単なるコード補完や生成ではなく、AIを「熟練のアーキテクト」としてパートナーにします。
