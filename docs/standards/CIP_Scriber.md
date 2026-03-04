@@ -85,47 +85,60 @@ AIが利便性のために外部の未承認ライブラリを導入すること
 
 ---
 
-## 6. 実装サンプル：アトミック・データ転送 (v2.0 Full)
+## 6. 構文別アノテーション注入ルール (Micro-Rules)
+
+AIは以下の構文を使用する際、必ず対応するアノテーションを注入すること。
+
+| Mermaid構文 | アノテーションの役割 | 記述例 |
+| --- | --- | --- |
+| **単一ノード `[ ]`** | アクションの定義 | `["` **データ加工** <br><br> `@実行:` 物理メモリの平坦化 `"]` |
+| **判定ノード `{ }`** | 論理的根拠 | `{"` **権限チェック** <br><br> `@理由:` 特権昇格攻撃の遮断 `"}` |
+| **サブグラフ `subgraph`** | セキュリティ・物理境界 | `subgraph` 内に `@policy` (allow/restrict) を記述 |
+| **戻り矢印 `-->`** | 反復・再帰の制御 | 戻り先に `@制約:` 脱出条件やスタック破棄を記述 |
+
+---
+
+## 7. ホワイトボード・ハック (Visual Refactoring Patterns)
+
+既存システムの変更やモジュールの挿げ替えを表現するための視覚的テクニック。
+
+### 7.1 モジュール挿げ替え (The Swapping Hack)
+
+古い接続を切断し、新しいロジックをバイパスさせる。
+
+```mermaid
+flowchart LR
+    Old["`**旧ロジック**
+    @状態: 廃止予定`"] -- x --- X((切断))
+    
+    New{{"`**新ロジック (v2.0)**
+    @理由: ボトルネック解消
+    @役割: 非同期エンジン`"}} -.-> Target
+
+    classDef deleted fill:#fdd,stroke:#f66,stroke-dasharray: 5 5,color:#999
+    classDef added fill:#dfd,stroke:#2a2,stroke-width:4px
+    class Old deleted
+    class New added
+```
+
+### 7.2 セキュリティ境界の「檻」 (The Policy Cage)
+
+信頼できない外部ライブラリやIOを特定のサブグラフに閉じ込める。
 
 ```mermaid
 flowchart TD
-    subgraph DataSchema ["【データ構造定義】"]
-        Packet{{"`**通信パケット**
-        ---
-        - ヘッダ: 数値
-        - ペイロード: 文字列
-        - 整合性チェック: 数値`"}}
+    subgraph Sandbox ["【隔離境界: @policy allow(none)】"]
+        Logic{{"`**純粋論理演算**
+        @制約: 外部IO禁止`"}}
     end
-
-    Start([開始]) --> Verify
-
-    Verify{{"`**サイズ検証**
-    ---
-    **@理由**: バッファ溢れ防止
-    **判定**: 長さ > 1024
-    **@役割**: バリデーター
-    **@入力**: 通信パケット
-    `"}}
-
-    Verify -- "正常" --> NetworkBoundary
-
-    subgraph NetworkBoundary ["【セキュリティ境界: Network】"]
-        direction TB
-        %% @policy: allow(socket, ssl) restrict(外部ライブラリ禁止)
-        
-        Open[:ソケットを開く] --> Send{{"`**パケット送信**
-        ---
-        **@実行**: 物理デバイスへ送出
-        **@役割**: アトミックな通信路の確保
-        **@制約**: 終了時は成否問わず必ずハンドルを閉じバッファを破棄すること
-        **@出力**: 送信成否ステータス
-        `"}}
-    end
-
-    Send --> End([送信完了])
-
-    style NetworkBoundary fill:#f0f4f8,stroke:#005a9c,stroke-dasharray: 5 5
-
+    style Sandbox fill:#fff9c4,stroke:#fbc02d,stroke-dasharray: 10 5
 ```
 
 ---
+
+## 8. 運用ガイドライン (Usage Guide)
+
+1. **文末確定性**: アノテーションの内容は「〜を検証する」「〜を破棄する」のように、AIに結末を宣言させること。
+2. **識別子の保護**: 変数や関数名はバッククォート ( ` ) で囲み、地の文と分離すること。
+3. **トポロジーの自由**: サンプルに固執せず、設計の物理構造（並列、再帰、階層）に合わせてMermaidの形を最適化すること。
+
