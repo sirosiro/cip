@@ -268,9 +268,31 @@ class BridgeCore:
                     sys.stdout.flush()
 
                     output_buffer += data
-                    if len(output_buffer) > 20000:
-                        output_buffer = output_buffer[-10000:]
+                    
+                    try:
+                        decoded_text = output_buffer.decode('utf-8', errors='ignore')
+                    except Exception:
+                        decoded_text = ""
+                        
+                    # @intent:rationale パケットの状態に応じた動的バッファ管理
+                    # 開始タグがある（パケット構築中）場合は切り捨てず保護する
+                    has_start_tag = False
+                    for tag in ["NEED_CONSENSUS", "ACCEPTED", "CONFLICT"]:
+                        if f"[{tag}]" in decoded_text:
+                            has_start_tag = True
+                            break
+                            
+                    if not has_start_tag:
+                        # タグがない（平常時、ノイズ蓄積中）は短く保つ
+                        if len(output_buffer) > 50000:
+                            output_buffer = output_buffer[-10000:]
+                    else:
+                        # タグがある場合でも、異常な無限出力を防ぐための安全装置 (5MB)
+                        if len(output_buffer) > 5 * 1024 * 1024:
+                            self.log_event("WARNING: Buffer exceeded 5MB during packet construction. Truncating.")
+                            output_buffer = output_buffer[-10000:]
 
+                    # 再度デコード（バッファが切り詰められた可能性があるため）
                     try:
                         decoded_text = output_buffer.decode('utf-8', errors='ignore')
                     except Exception:
@@ -295,6 +317,10 @@ class BridgeCore:
                     packets = self.protocol.parse(decoded_text)
                     if packets:
                         for packet in packets:
+                            # 【追加】自分が送信元としてパースされたパケットのみを処理する（エコーバック対策）
+                            if packet.sender_id != self.my_id:
+                                continue
+                                
                             if self.negotiator.should_route(packet):
                                 self.negotiator.update_state(packet)
                                 target = self.negotiator.get_route(packet)

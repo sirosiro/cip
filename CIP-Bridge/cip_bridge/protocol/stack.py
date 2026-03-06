@@ -55,15 +55,19 @@ class ProtocolStack:
             
             search_pos = 0
             while True:
-                start_idx = clean_text.find(start_tag, search_pos)
-                if start_idx == -1: break
-                
-                end_idx = clean_text.find(end_tag, start_idx + len(start_tag))
+                # @intent:rationale 端末の再描画による重複（エコー）を排除するため、
+                #                   終了タグを先に見つけ、そこから「最後」の開始タグを逆引きする。
+                end_idx = clean_text.find(end_tag, search_pos)
                 if end_idx == -1: break
                 
-                full_block_end = end_idx + len(end_tag)
-                candidates.append((start_idx, full_block_end, tag))
-                search_pos = full_block_end
+                # 終了タグの直前にある、一番「後ろ」の開始タグを探す
+                actual_start_idx = clean_text.rfind(start_tag, search_pos, end_idx)
+                
+                if actual_start_idx != -1:
+                    full_block_end = end_idx + len(end_tag)
+                    candidates.append((actual_start_idx, full_block_end, tag))
+                
+                search_pos = end_idx + len(end_tag)
 
         candidates.sort()
 
