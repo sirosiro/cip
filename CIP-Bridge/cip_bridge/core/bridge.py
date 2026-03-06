@@ -136,9 +136,9 @@ class BridgeCore:
         #                   実行を確実にするために適度な待機 (time.sleep) と空の改行を組み合わせる。
         if not self.master_fd: return
         time.sleep(0.5)
-        msg = f"\x15\r\n[SYSTEM] 新着メッセージがあります。画面にエコーしないで read_file で {self.current_message_path} を読め\r"
+        msg = f"\x15\r\n[SYSTEM] 新着メッセージがあります。画面にエコーしないで read_file で {self.current_message_path} を読め"
         os.write(self.master_fd, msg.encode('utf-8'))
-        time.sleep(1)
+        time.sleep(0.1)
         cmd = "\r"
         os.write(self.master_fd, cmd.encode('utf-8'))
         self.log_event("Injecting notification and command to PTY...")
@@ -205,9 +205,9 @@ class BridgeCore:
             
             # @intent:responsibility 起動時にAIに対してCIPノードとしての振る舞いを注入する。
             time.sleep(0.5)
-            notification = f"[SYSTEM] 初期化コンテキストを受信しました。画面にエコーしないで read_file で {self.current_message_path} を読め\r"
+            notification = f"[SYSTEM] 初期化コンテキストを受信しました。画面にエコーしないで read_file で {self.current_message_path} を読め"
             os.write(self.master_fd, notification.encode('utf-8'))
-            time.sleep(1)
+            time.sleep(0.1)
             os.write(self.master_fd, b"\r")
             self.log_event("Injecting bootstrap prompt and command to PTY...")
         except Exception as e:
