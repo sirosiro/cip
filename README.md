@@ -122,7 +122,7 @@ CIP (Core-Intent Prompting) is not just a collection of templates; it is a Logic
 
 ### The Anti-Hallucination Mechanism: Why SOV?
 
-Japanese is an **SOV (Subject-Object-Verb)** language, where the Action (Verb) always comes at the end. I discovered that this linguistic structure is the most effective way to control Large Language Models (LLMs) because it aligns with how the Attention mechanism processes tokens.
+Japanese is an **SOV (Subject-Object-Verb)** language, where the Action (Verb) always comes at the end. My discovery is that this linguistic structure is the most effective way to control Large Language Models (LLMs) because it aligns with how the Attention mechanism processes tokens.
 
 #### The Problem with SVO (Subject-Verb-Object)
 
@@ -130,7 +130,7 @@ In standard English (SVO), prompts typically start with a command: "Write a func
 
 #### The CIP Solution: Structural SOV
 
-By adopting an SOV-style structure, I neutralize this predictive momentum through three stages:
+By adopting an SOV-style structure, my approach neutralizes this predictive momentum through three stages:
 
 * **Saturation First:** By placing all specifications (Objects) before the command (Verb), the AI's internal state is fully saturated with your specific requirements.
 * **Zero-Inference Buffer:** The AI is forced to wait. It cannot start the probabilistic guessing game until the final trigger command appears.
