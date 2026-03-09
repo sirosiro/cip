@@ -32,7 +32,7 @@ class TestFSBus(unittest.TestCase):
         self.bus.setup()
         self.assertTrue(os.path.exists(self.bus.bus_dir))
         self.assertTrue(os.path.exists(self.bus.pid_path))
-        self.assertTrue(os.path.exists(self.bus.inbox_path))
+        self.assertTrue(os.path.exists(self.bus.inbox_dir))
         
         # Check if PID is correct
         with open(self.bus.pid_path, "r") as f:
@@ -50,7 +50,9 @@ class TestFSBus(unittest.TestCase):
         self.assertTrue(success)
         
         # Verify message written correctly
-        with open(self.bus.inbox_path, "r") as f:
+        files = os.listdir(self.bus.inbox_dir)
+        self.assertEqual(len(files), 1)
+        with open(os.path.join(self.bus.inbox_dir, files[0]), "r") as f:
             raw_content = f.read()
             self.assertIn(f"[FROM: @{self.bus_id}]", raw_content)
             self.assertIn(message, raw_content)

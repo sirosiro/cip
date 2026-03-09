@@ -122,7 +122,7 @@ CIP (Core-Intent Prompting) is not just a collection of templates; it is a Logic
 
 ### The Anti-Hallucination Mechanism: Why SOV?
 
-Japanese is an **SOV (Subject-Object-Verb)** language, where the Action (Verb) always comes at the end. My discovery is that this linguistic structure is the most effective way to control Large Language Models (LLMs) because it aligns with how the Attention mechanism processes tokens.
+Japanese is an **SOV (Subject-Object-Verb)** language, where the Action (Verb) always comes at the end. My discovery is that while LLMs process tokens numerically, the sequence of information fundamentally changes the "Attention" weight distribution. By using an SOV-style structure, we can defer the final probability calculation (the Action) until all context vectors are fully integrated into the model's hidden state.
 
 #### The Problem with SVO (Subject-Verb-Object)
 

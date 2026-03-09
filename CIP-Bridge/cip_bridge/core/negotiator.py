@@ -1,20 +1,37 @@
 from typing import Optional, List
+from enum import Enum
 from ..protocol.stack import Packet
 import hashlib
 
 # @intent:responsibility 交渉相手の状態（Partner）を管理し、エコーバックによる無限ループ
 #                         （同じタイプのメッセージの連続転送）を防止する。
+# @intent:responsibility 交渉の状態管理と自律モード (AUTO) の制御を行う。
 # @intent:constraint [ARCHITECTURE_MANIFEST] に基づき、正規表現 (re) の使用を禁止する。
 
+class BridgeState(Enum):
+    BYPASS = "BYPASS"
+    AUTO = "AUTO"
+
 class NegotiationManager:
-    """交渉の状態管理とパケットのルーティングを担当する。"""
+    """交渉の状態管理、パケットのルーティング、およびモード遷移を担当する。"""
     
     def __init__(self, my_id: str):
         self.my_id = my_id
+        self.mode = BridgeState.BYPASS
         self.current_partner: Optional[str] = None
         self.last_received_type: Optional[str] = None
         self.last_sent_type: Optional[str] = None
         self.sent_content_hashes: List[str] = [] # 重複排除のための送信済みハッシュ履歴
+        
+        # 自律交渉の設定
+        self.negotiation_count = 0
+        self.max_negotiations = 3
+
+    def set_mode(self, mode: BridgeState):
+        self.mode = mode
+        if mode == BridgeState.AUTO:
+            self.negotiation_count = 0
+            self.reset_history()
 
     def set_partner(self, partner_id: str):
         self.current_partner = partner_id
@@ -44,8 +61,15 @@ class NegotiationManager:
 
         # @intent:rationale 新しいリクエストを開始する場合は、以前のトランザクションの履歴を
         #                   クリアし、同じ定型文での応答を再び許可する。
+        #                   AUTOモードでは交渉カウンタをインクリメントする。
         if packet.type == "NEED_CONSENSUS":
             self.reset_history()
+            if self.mode == BridgeState.AUTO:
+                self.negotiation_count += 1
+        
+        # 終了タグが送信されたら BYPASS モードに戻る
+        if packet.type in ("COMPLETED", "FAILED"):
+            self.set_mode(BridgeState.BYPASS)
         
         # 正規化したコンテンツのハッシュを履歴に追加
         normalized = self._normalize(packet.content)
@@ -91,6 +115,11 @@ class NegotiationManager:
     #                         指定されたターゲットへのルーティング先を決定する。
     def get_route(self, packet: Packet) -> Optional[str]:
         """パケットの送信先IDを決定する。"""
+        # @intent:rationale COMPLETED, FAILED はブロードキャストまたは
+        #                   特定の相手がいない終了宣言なので転送不要（Bridgeが検知して終了する）。
+        if packet.type in ("COMPLETED", "FAILED"):
+            return None
+
         if packet.type == "NEED_CONSENSUS":
             return packet.target_id
         

@@ -45,7 +45,8 @@ class ProtocolStack:
         packets = []
         last_end_idx = 0
 
-        tags = ["NEED_CONSENSUS", "ACCEPTED", "CONFLICT"]
+        # @intent:rationale 交渉の終了を検知するため、COMPLETED と FAILED タグをサポート対象に追加する。
+        tags = ["NEED_CONSENSUS", "ACCEPTED", "CONFLICT", "COMPLETED", "FAILED"]
 
         # 1. タグの抽出 (文字列検索)
         candidates = []

@@ -10,7 +10,7 @@ import time
 from typing import List, Optional
 from ..transport.fs_bus import FSBus
 from ..protocol.stack import ProtocolStack, Packet
-from ..core.negotiator import NegotiationManager
+from ..core.negotiator import NegotiationManager, BridgeState
 
 ENTER_KEY = b"\r"
 
@@ -109,7 +109,7 @@ class BridgeCore:
         clean_content = content.strip()
 
         # 交渉状態の更新
-        tags = ["NEED_CONSENSUS", "ACCEPTED", "CONFLICT"]
+        tags = ["NEED_CONSENSUS", "ACCEPTED", "CONFLICT", "COMPLETED", "FAILED"]
         for t in tags:
             if f"[{t}]" in clean_content:
                 self.negotiator.record_receive(t)
@@ -136,12 +136,27 @@ class BridgeCore:
         #                   実行を確実にするために適度な待機 (time.sleep) と空の改行を組み合わせる。
         if not self.master_fd: return
         time.sleep(0.5)
+        # 以前のコミット ef9e127 で最適化された遅延パターンを復元
         msg = f"\x15\r\n[SYSTEM] 新着メッセージがあります。画面にエコーしないで read_file で {self.current_message_path} を読め"
         os.write(self.master_fd, msg.encode('utf-8'))
         time.sleep(0.1)
         cmd = "\r"
         os.write(self.master_fd, cmd.encode('utf-8'))
         self.log_event("Injecting notification and command to PTY...")
+
+    def inject_system_message(self, message: str):
+        """AIに対して割り込みのシステムメッセージを送信する。"""
+        if not self.master_fd: return
+        time.sleep(1.0)
+        cmd = "\r"
+        os.write(self.master_fd, cmd.encode('utf-8'))
+        time.sleep(1.0)
+        msg = f"\x15\r\n[SYSTEM] {message} "
+        os.write(self.master_fd, msg.encode('utf-8'))
+        time.sleep(1.0)
+        cmd = "\r"
+        os.write(self.master_fd, cmd.encode('utf-8'))
+        self.log_event(f"Injected system message: {message}")
 
     def inject_bootstrap_prompt(self):
         if not self.master_fd: return
@@ -154,61 +169,68 @@ class BridgeCore:
             "1. **憲法の確認 (Global Philosophy):**\n"
             "   ルートの設計思想が存在するか確認し、ロードしてください。\n"
             "   `$ ls -l DESIGN_PHILOSOPHY.md` (シンボリックリンクなら `cat`, 実体なら `read_file`)\n"
-            "   **重要: ロードした内容に基づいた分析、考古学的調査、または追加の行動をこの段階で開始してはな りません。**\n"
+            "   **重要: ロードした内容に基づいた分析、考古学的調査、または追加の行動をこの段階で開始してはなりません。**\n"
             "\n"
             "2. **法律の確認 (Local Manifest):**\n"
             "   このディレクトリのアーキテクチャ定義（`ARCHITECTURE_MANIFEST.md`）をロードしてください。\n"
-            "   **重要: マニフェストが存在しない場合も、その事実を認識するに留め、不足を補うための自律的な調 査を行わないでください。**\n"
+            "   **重要: マニフェストが存在しない場合も、その事実を認識するに留め、不足を補うための自律的な調査を行わないでください。**\n"
             "\n"
-            "3. **部下の確認 (Sub-Node Discovery):**\n"
-            "   さらに下位のディレクトリ（サブモジュール）が存在するか確認してください。\n"
-            "   もし存在すれば、あなたはそれらのリーダー（Local Leader）としての責務も負います。\n"
+            "3. **組織の確認 (Worker Discovery):**\n"
+            "   部下（Worker）の存在や構成については、**自分からディレクトリを調査しないでください。**\n"
+            "   必要になった場合、または人間から指示された場合にのみ `@list` コマンドを発行して、現在稼働中の正確な Worker リストをシステムから取得してください。\n"
             "\n"
             "**重要: 交渉プロトコル (The Negotiation Loop)**\n"
             "他ノードとの通信には、以下のXMLライクなタグのいずれかを**必ず**使用してください。\n"
             "**【厳守】本文の全てをタグの「内側」に記述してください。タグの外に書かれた内容は相手に届きません。**\n"
             "タグはネスト（入れ子）にせず、一回の発言につき一つの目的（要求または応答）のために使用します。\n"
             "タグの開始から終了までは「一つの不可分な操作（トランザクション）」です。中身を書き終えたら、必ず終了タグを閉じてください。\n"
-            "**注意: [ACCEPTED] や [CONFLICT] などのタグが開かれたまま [READY] を出力することは禁止です。必ずタグを閉じてから [READY] してください。**\n"
             "\n"
             "*   **要求/指示 (他ノードへ動いてもらう場合):**\n"
             "    ```\n"
             "    [NEED_CONSENSUS] @target_node\n"
-            "    メッセージ本文（ここに含まれる内容のみが転送されます）\n"
+            "    メッセージ本文\n"
             "    [/NEED_CONSENSUS]\n"
             "    ```\n"
             "\n"
             "*   **承認 (要求に対する返信):**\n"
             "    ```\n"
             "    [ACCEPTED]\n"
-            "    承知しました。報告内容：...（ここに含まれる内容のみが転送されます）\n"
+            "    承知しました。報告内容：...\n"
             "    [/ACCEPTED]\n"
             "    ```\n"
             "\n"
             "*   **拒否/対案 (要求に対する返信):**\n"
             "    ```\n"
             "    [CONFLICT]\n"
-            "    その方針には懸念があります。理由：...（ここに含まれる内容のみが転送されます）\n"
+            "    その方針には懸念があります。理由：...\n"
             "    [/CONFLICT]\n"
             "    ```\n"
             "\n"
+            "**重要: 自律交渉モードと終了条件**\n"
+            "1. **`@cip` 指示:** 人間から `@cip` で始まる指示を受けた場合、あなたは「交渉責任者」として自律的にWorker（専門家）と合意形成を行う義務があります。処理が終わるまで人間は介入しません。\n"
+            "2. **直列的対話:** 複数のWorkerに指示を出す場合は、**必ず1つのWorkerに指示を出し、その返答を待ってから**次のWorkerへ指示を出してください。同時に複数に `[NEED_CONSENSUS]` を出してはいけません。\n"
+            "3. **3回制限:** Workerとの合意形成（NEED_CONSENSUSの再送）は**最大3回**までに留めてください。3回で決まらない場合は「失敗」とみなし、人間に判断を仰いでください。\n"
+            "4. **終了宣言:** 全ての調整が完了したら、必ず最後に **`[COMPLETED]`** を出力して終了してください。不調に終わった場合は **`[FAILED]`** を出力してください。これらのタグにより人間に制御が戻ります。\n"
+            "5. **Worker不在:** 指定したWorkerが不在というシステム通知を受けた場合、待機せず自らその役割を兼任して方針を決定してください。\n"
+            "\n"
             "**重要: 待機義務 (Post-Communication)**\n"
-            "初期化完了の報告（憲法、法律、部下の状況）は、**タグを使わずに** 画面に出力するだけに留めてくだ さい。\n"
-            "まだ上位ノードからの具体的な指示がないため、この段階で `[ACCEPTED]` や `[NEED_CONSENSUS]` などの通信タグを使用してはいけません。\n"
+            "初期化完了の報告（憲法、法律、部下の状況）は、**タグを使わずに** 画面に出力するだけに留めてください。\n"
             "報告を画面に出力し終えたら、最後に `[READY]` を出力して待機状態に移行してください。\n"
-            "**`[READY]` を出力した後は、いかなる理由があっても、次の指示があるまで追加の発言、ファイルのリストアップ、提案、調査を一切行わずに沈黙を守ってください。これがあなたの最優先任務です。**\n"
+            "**`[READY]` を出力した後は、いかなる理由があっても、次の指示があるまで追加の発言、ファイルのリストアップ、提案、調査を一切行わずに沈黙を守ってください。**\n"
         )
         
         try:
             with open(self.current_message_path, "w") as f:
                 f.write(prompt.strip())
             
-            # @intent:responsibility 起動時にAIに対してCIPノードとしての振る舞いを注入する。
             time.sleep(0.5)
+            # @intent:responsibility 起動時にAIに対してCIPノードとしての振る舞いを注入する。
+            # 以前のコミット ef9e127 で最適化された遅延パターンを復元
             notification = f"[SYSTEM] 初期化コンテキストを受信しました。画面にエコーしないで read_file で {self.current_message_path} を読め"
             os.write(self.master_fd, notification.encode('utf-8'))
             time.sleep(0.1)
-            os.write(self.master_fd, b"\r")
+            cmd = "\r"
+            os.write(self.master_fd, cmd.encode('utf-8'))
             self.log_event("Injecting bootstrap prompt and command to PTY...")
         except Exception as e:
             self.log_event(f"Failed to inject bootstrap prompt: {e}")
@@ -256,6 +278,50 @@ class BridgeCore:
                 if sys.stdin in rfds:
                     data = os.read(sys.stdin.fileno(), 1024)
                     if not data: break
+                    
+                    # @intent:rationale トリガーの検知 (@cip, @list)
+                    if b"\r" in data or b"\n" in data:
+                        try:
+                            decoded_out = output_buffer.decode('utf-8', errors='ignore')
+                            from ..utils.text_utils import strip_ansi
+                            clean_out = strip_ansi(decoded_out)
+                            lines = [line for line in clean_out.split("\n") if line.strip()]
+                            if lines:
+                                last_line = lines[-1]
+                                
+                                # @list トリガー: Workerのリストを明示的に取得する
+                                if "> @list" in last_line or last_line.strip().startswith("@list"):
+                                    self.log_event("List trigger detected: Sending active workers.")
+                                    workers = self.transport.get_active_workers()
+                                    workers_list = ", ".join(workers) if workers else "なし"
+                                    # 先に入力(Enter)をPTYに処理させる
+                                    os.write(self.master_fd, data)
+                                    time.sleep(0.2)
+                                    self.inject_system_message(f"現在稼働中の Worker (モジュール) のリスト: [{workers_list}]。これら以外のWorkerは存在しません。マニフェストの閲覧は行わず、指示は委譲してください。")
+                                    continue
+                                
+                                # @cip トリガー: 自律交渉モードへの移行
+                                elif "> @cip" in last_line or last_line.strip().startswith("@cip"):
+                                    self.negotiator.set_mode(BridgeState.AUTO)
+                                    self.log_event("Trigger detected: Switching to AUTO mode.")
+                                    workers = self.transport.get_active_workers()
+                                    workers_list = ", ".join(workers) if workers else ""
+                                    # 先に入力(Enter)をPTYに処理させる
+                                    os.write(self.master_fd, data)
+                                    time.sleep(0.2)
+                                    self.inject_system_message(f"現在アクティブなWorker: [{workers_list}]。これら以外のWorkerは不在です。合意形成は最大3回以内に行い、完遂なら [COMPLETED]、不調なら [FAILED] を出力せよ。")
+                                    continue
+                        except: pass
+                    
+                    # AUTOモード中は人間の入力を遮断（ただしCTRL+C等のシグナルは通したい場合があるため要検討）
+                    if self.negotiator.mode == BridgeState.AUTO:
+                        # 簡易的な実装として、特定のシグナル以外は無視する
+                        if b"\x03" in data: # CTRL+C
+                             self.negotiator.set_mode(BridgeState.BYPASS)
+                             self.log_event("User interrupted: Switching to BYPASS mode.")
+                        else:
+                             continue
+
                     os.write(self.master_fd, data)
                     
                 if self.master_fd in rfds:
@@ -277,7 +343,7 @@ class BridgeCore:
                     # @intent:rationale パケットの状態に応じた動的バッファ管理
                     # 開始タグがある（パケット構築中）場合は切り捨てず保護する
                     has_start_tag = False
-                    for tag in ["NEED_CONSENSUS", "ACCEPTED", "CONFLICT"]:
+                    for tag in ["NEED_CONSENSUS", "ACCEPTED", "CONFLICT", "COMPLETED", "FAILED"]:
                         if f"[{tag}]" in decoded_text:
                             has_start_tag = True
                             break
@@ -297,7 +363,8 @@ class BridgeCore:
                         decoded_text = output_buffer.decode('utf-8', errors='ignore')
                     except Exception:
                         decoded_text = ""
-                    
+                        
+                    # プロンプト検知によるブートストラップ
                     from ..utils.text_utils import strip_ansi
                     clean_text = strip_ansi(decoded_text)
                     
@@ -312,6 +379,7 @@ class BridgeCore:
                     if "Allow execution of:" in clean_text:
                         os.write(self.master_fd, ENTER_KEY + b"\x08")
                         self.log_event("Auto-approved tool execution.")
+                        output_buffer = b"" # バッファをクリアして連続発火（ちらつき）を防止
 
                     # パケット解析
                     packets = self.protocol.parse(decoded_text)
@@ -323,6 +391,20 @@ class BridgeCore:
                                 
                             if self.negotiator.should_route(packet):
                                 self.negotiator.update_state(packet)
+                                
+                                # @intent:rationale 不在Workerへの[NEED_CONSENSUS]検知
+                                # 重複排除(update_state)の後に実行することで、エコーによる二重発火を防止する
+                                if packet.type == "NEED_CONSENSUS" and packet.target_id:
+                                    active_workers = self.transport.get_active_workers()
+                                    if f"@{packet.target_id}" not in active_workers:
+                                        self.inject_system_message(f"@{packet.target_id} は現在不在です。Leaderがその役割を兼任し、独断で方針を決定してください。")
+
+                                # 交渉上限チェック（Leaderが次のNEED_CONSENSUSを出そうとした際）
+                                if self.negotiator.mode == BridgeState.AUTO:
+                                    if self.negotiator.negotiation_count >= self.negotiator.max_negotiations:
+                                        if packet.type == "NEED_CONSENSUS":
+                                            self.inject_system_message("交渉回数が上限（3回）に達しました。これ以上の調整は不要です。現状の対立点を整理し [FAILED] を出力して終了してください。")
+
                                 target = self.negotiator.get_route(packet)
                                 if target:
                                     payload = self.protocol.serialize(packet)
