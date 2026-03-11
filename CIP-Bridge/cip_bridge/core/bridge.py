@@ -145,18 +145,36 @@ class BridgeCore:
         self.log_event("Injecting notification and command to PTY...")
 
     def inject_system_message(self, message: str):
-        """AIに対して割り込みのシステムメッセージを送信する。"""
+        """AIに対して割り込みのシステムメッセージを送信する（非同期遅延実行）。"""
         if not self.master_fd: return
-        time.sleep(1.0)
-        cmd = "\r"
-        os.write(self.master_fd, cmd.encode('utf-8'))
-        time.sleep(1.0)
-        msg = f"\x15\r\n[SYSTEM] {message} "
-        os.write(self.master_fd, msg.encode('utf-8'))
-        time.sleep(1.0)
-        cmd = "\r"
-        os.write(self.master_fd, cmd.encode('utf-8'))
-        self.log_event(f"Injected system message: {message}")
+        
+        # @intent:rationale AIの出力直後（[/NEED_CONSENSUS]検知直後など）は、CLIがプロンプトを描画する前であり、
+        #                   このタイミングでPTYに入力すると「ペースト」と判定されて \r が改行として処理され、
+        #                   プロンプトに送信待ちのまま残ってしまう。
+        #                   これを防ぐため、別スレッドで待機し、CLIが入力受付状態に戻ってから注入する。
+        import threading
+        def delayed_inject():
+            try:
+                time.sleep(2.0) # CLIがプロンプト表示に戻るまで待機
+                
+                with open(self.current_message_path, "w") as f:
+                    f.write(f"[SYSTEM_MESSAGE]\n{message}\n")
+                
+                time.sleep(0.1)
+                os.write(self.master_fd, b"\x15") # CTRL+U (クリア)
+                time.sleep(0.1)
+                
+                msg = f"\r\n[SYSTEM] システムからの割り込み通知があります。画面にエコーしないで read_file で {self.current_message_path} を読め"
+                os.write(self.master_fd, msg.encode('utf-8'))
+                
+                # ペーストモード判定を避けるため、Enterの前に少し待機
+                time.sleep(0.5) 
+                os.write(self.master_fd, b"\r")
+                self.log_event(f"Injected system message via delayed thread: {message}")
+            except Exception as e:
+                self.log_event(f"Delayed injection failed: {e}")
+                
+        threading.Thread(target=delayed_inject, daemon=True).start()
 
     def inject_bootstrap_prompt(self):
         if not self.master_fd: return
