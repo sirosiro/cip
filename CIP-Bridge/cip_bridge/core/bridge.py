@@ -68,7 +68,7 @@ class BridgeCore:
                 self.log_event(f"Failed to link DESIGN_PHILOSOPHY.md: {e}")
                 
         # 2. ドキュメントレジストリ (_docs) のリンク
-        # @intent:rationale フラクタル構造下で、下位ノードのAIが CIP_Scriber 等の
+        # @intent:rationale フラクタル構造下で、下位ノードのAIが CIP-Scrivener 等の
         #                   グローバルな仕様書にアクセスできるようにするため。
         target_docs = "../docs"
         link_docs = "_docs"
