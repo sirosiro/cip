@@ -1,4 +1,4 @@
-# CIP-Bridge Architecture Manifest
+# CIP-Bridge (Context-Integrity Preservation Bridge) Architecture Manifest
 
 ## 1. 目的 (Purpose)
 本ドキュメントは、CIP-Bridge システムの設計意図、コンポーネントの責務、および不変条件を定義する。
