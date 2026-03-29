@@ -105,5 +105,12 @@ class TestNegotiationManager(unittest.TestCase):
         self.nego.update_state(pkt)
         self.assertEqual(len(self.nego.sent_content_hashes), 100) # Should have popped the oldest one
 
+    def test_route_system_tag(self):
+        pkt = Packet(type="SYSTEM", content="Instruction", target_id="target_node")
+        self.assertTrue(self.nego.should_route(pkt))
+        self.nego.update_state(pkt)
+        self.assertEqual(self.nego.get_route(pkt), "target_node")
+        self.assertEqual(self.nego.get_partner(), "target_node")
+
 if __name__ == "__main__":
     unittest.main()

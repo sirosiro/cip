@@ -60,6 +60,15 @@ class TestProtocolStack(unittest.TestCase):
         packets_self = self.stack.parse(raw_text_self)
         self.assertEqual(len(packets_self), 1) # Allowed
 
+    def test_parse_system_tag(self):
+        # [SYSTEM] tag without newline
+        raw_text = "[SYSTEM]@worker status[/SYSTEM]"
+        packets = self.stack.parse(raw_text)
+        self.assertEqual(len(packets), 1)
+        self.assertEqual(packets[0].type, "SYSTEM")
+        self.assertEqual(packets[0].target_id, "worker")
+        self.assertIn("status", packets[0].content)
+
     def test_serialize(self):
         pkt = Packet(type="ACCEPTED", content="Test message")
         serialized = self.stack.serialize(pkt)

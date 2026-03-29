@@ -59,10 +59,10 @@ class NegotiationManager:
         self.last_sent_type = packet.type
         # last_received_type は受信時のみ更新されるべきなので、ここでは触らない
 
-        # @intent:rationale 新しいリクエストを開始する場合は、以前のトランザクションの履歴を
-        #                   クリアし、同じ定型文での応答を再び許可する。
+        # @intent:rationale 新しいリクエスト（または権威ある指示）を開始する場合は、
+        #                   以前のトランザクションの履歴をクリアし、応答を許可する。
         #                   AUTOモードでは交渉カウンタをインクリメントする。
-        if packet.type == "NEED_CONSENSUS":
+        if packet.type in ("NEED_CONSENSUS", "SYSTEM"):
             self.reset_history()
             if self.mode == BridgeState.AUTO:
                 self.negotiation_count += 1
@@ -80,14 +80,14 @@ class NegotiationManager:
             if len(self.sent_content_hashes) > 100:
                 self.sent_content_hashes.pop(0)
 
-        if packet.type == "NEED_CONSENSUS" and packet.target_id:
+        if packet.type in ("NEED_CONSENSUS", "SYSTEM") and packet.target_id:
             self.set_partner(packet.target_id)
 
     # @intent:responsibility 受信したメッセージのタイプを記録する。
     def record_receive(self, packet_type: str):
         self.last_received_type = packet_type
-        # @intent:rationale 相手から新しいリクエストが来た場合も、履歴をリセットして応答を許可する。
-        if packet_type == "NEED_CONSENSUS":
+        # @intent:rationale 相手から新しいリクエストや権威ある指示が来た場合も、履歴をリセットして応答を許可する。
+        if packet_type in ("NEED_CONSENSUS", "SYSTEM"):
             self.reset_history()
 
     # @intent:responsibility 無限ループおよび同一内容の再送を検知して転送をブロックする。
@@ -120,7 +120,7 @@ class NegotiationManager:
         if packet.type in ("COMPLETED", "FAILED"):
             return None
 
-        if packet.type == "NEED_CONSENSUS":
+        if packet.type in ("NEED_CONSENSUS", "SYSTEM"):
             return packet.target_id
         
         elif packet.type in ("ACCEPTED", "CONFLICT"):

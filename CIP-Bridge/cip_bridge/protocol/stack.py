@@ -46,7 +46,8 @@ class ProtocolStack:
         last_end_idx = 0
 
         # @intent:rationale 交渉の終了を検知するため、COMPLETED と FAILED タグをサポート対象に追加する。
-        tags = ["NEED_CONSENSUS", "ACCEPTED", "CONFLICT", "COMPLETED", "FAILED"]
+        # @intent:rationale システム（人間/リーダー）からの権威ある指示として SYSTEM タグをサポート対象に追加する。
+        tags = ["SYSTEM", "NEED_CONSENSUS", "ACCEPTED", "CONFLICT", "COMPLETED", "FAILED"]
 
         # 1. タグの抽出 (文字列検索)
         candidates = []
@@ -65,6 +66,13 @@ class ProtocolStack:
                 actual_start_idx = clean_text.rfind(start_tag, search_pos, end_idx)
                 
                 if actual_start_idx != -1:
+                    # @intent:rationale AIがコードブロック（```）内でフェイクのタグ例を出力した場合、無視する
+                    code_block_count = clean_text[:actual_start_idx].count("```")
+                    if code_block_count % 2 == 1:
+                        self._log(f"Ignoring nested block {tag} because it is inside a markdown code block.")
+                        search_pos = end_idx + len(end_tag)
+                        continue
+
                     full_block_end = end_idx + len(end_tag)
                     candidates.append((actual_start_idx, full_block_end, tag))
                 
