@@ -8,6 +8,6 @@
   "dependencies": ["mcp"],
   "resources": [
     "DESIGN_PHILOSOPHY.md",
-    "CIP_Scrivener.md"
+    "docs/standards/CIP_Scrivener.md"
   ]
 }
