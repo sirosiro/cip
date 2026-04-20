@@ -1,0 +1,13 @@
+{
+  "name": "cip",
+  "version": "1.0.0",
+  "description": "Core-Intent Prompting (CIP) Architect Mode",
+  "type": "mcp",
+  "entrypoint": "server.py",
+  "runtime": "python3",
+  "dependencies": ["mcp"],
+  "resources": [
+    "DESIGN_PHILOSOPHY.md",
+    "CIP_Scrivener.md"
+  ]
+}
